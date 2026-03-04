@@ -1,3 +1,4 @@
+import rehypePrettyCode from "rehype-pretty-code";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import rehypeSlug from "rehype-slug";
 import rehypeStringify from "rehype-stringify";
@@ -19,6 +20,12 @@ function getTextFromNode(node: unknown): string {
   }
   return "";
 }
+
+const prettyCodeOptions = {
+  theme: "github-dark",
+  keepBackground: false,
+  defaultLang: "text",
+};
 
 export async function parseMarkdownToHtml(markdown: string): Promise<ParseResult> {
   const headings: DocHeading[] = [];
@@ -46,10 +53,39 @@ export async function parseMarkdownToHtml(markdown: string): Promise<ParseResult
     ...defaultSchema,
     attributes: {
       ...defaultSchema.attributes,
-      // Allow class names for code/pre/span so later phases can style tokens safely.
-      code: [...(defaultSchema.attributes?.code || []), ["className"]],
-      pre: [...(defaultSchema.attributes?.pre || []), ["className"]],
-      span: [...(defaultSchema.attributes?.span || []), ["className"]],
+      // Allow attrs used by rehype-pretty-code token output.
+      code: [
+        ...(defaultSchema.attributes?.code || []),
+        ["className"],
+        ["data-language"],
+        ["data-theme"],
+        ["style"],
+      ],
+      pre: [
+        ...(defaultSchema.attributes?.pre || []),
+        ["className"],
+        ["data-language"],
+        ["data-theme"],
+        ["style"],
+      ],
+      span: [
+        ...(defaultSchema.attributes?.span || []),
+        ["className"],
+        ["style"],
+        ["data-line"],
+        ["data-highlighted-line"],
+        ["data-highlighted-chars"],
+      ],
+      figure: [
+        ...(defaultSchema.attributes?.figure || []),
+        ["className"],
+        ["data-rehype-pretty-code-figure"],
+      ],
+      div: [
+        ...(defaultSchema.attributes?.div || []),
+        ["className"],
+        ["data-rehype-pretty-code-fragment"],
+      ],
     },
   };
 
@@ -58,6 +94,7 @@ export async function parseMarkdownToHtml(markdown: string): Promise<ParseResult
     .use(remarkGfm)
     .use(remarkRehype)
     .use(rehypeSlug)
+    .use(rehypePrettyCode, prettyCodeOptions as never)
     .use(rehypeSanitize, schema as never)
     .use(rehypeStringify)
     .process(markdown);
