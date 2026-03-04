@@ -1,16 +1,22 @@
+export type DocHeading = {
+  depth: 1 | 2 | 3 | 4 | 5 | 6;
+  text: string;
+  id: string;
+};
+
+export type ParseResult = {
+  html: string; // rendered HTML
+  headings: DocHeading[];
+};
+
 export type DocState = {
   rawText: string;
   normalizedText: string;
-  // Phase 3: markdown AST + HTML will be added here
-  renderedPreview: string;
+  headings: DocHeading[];
+  renderedPreview: string; // HTML (Phase 3+)
 };
 
 export type NormalizeResult = {
   normalizedText: string;
   notes: string[]; // useful later for logging what got fixed
-};
-
-export type ParseResult = {
-  parseOutput: string;
-  notes: string[];
 };

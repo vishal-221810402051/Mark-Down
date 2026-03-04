@@ -34,3 +34,36 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
+
+/* Phase 3: basic doc typography (keep deterministic; upgrade in Phase 5) */
+.doc h1 { font-size: 1.875rem; line-height: 2.25rem; font-weight: 700; margin: 0 0 0.75rem; }
+.doc h2 { font-size: 1.375rem; line-height: 1.9rem; font-weight: 700; margin: 1.5rem 0 0.5rem; }
+.doc h3 { font-size: 1.125rem; line-height: 1.6rem; font-weight: 700; margin: 1.25rem 0 0.5rem; }
+
+.doc p { margin: 0.75rem 0; }
+.doc ul { margin: 0.75rem 0; padding-left: 1.25rem; list-style: disc; }
+.doc ol { margin: 0.75rem 0; padding-left: 1.25rem; list-style: decimal; }
+.doc li { margin: 0.25rem 0; }
+
+.doc pre {
+  margin: 0.9rem 0;
+  padding: 0.75rem 0.9rem;
+  background: #f6f8fa;
+  border: 1px solid rgba(0,0,0,0.08);
+  border-radius: 0.5rem;
+  overflow-x: auto;
+}
+.doc code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 0.9em;
+}
+.doc :not(pre) > code {
+  background: #f6f8fa;
+  border: 1px solid rgba(0,0,0,0.06);
+  padding: 0.1rem 0.35rem;
+  border-radius: 0.35rem;
+}
+
+.doc table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
+.doc th, .doc td { border: 1px solid rgba(0,0,0,0.12); padding: 0.5rem 0.6rem; text-align: left; vertical-align: top; }
+.doc th { background: #fafafa; font-weight: 600; }

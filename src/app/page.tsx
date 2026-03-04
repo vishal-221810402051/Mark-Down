@@ -1,36 +1,57 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import EditorPane from "@/components/EditorPane";
 import PreviewPane from "@/components/PreviewPane";
 import TopBar from "@/components/TopBar";
-import type { DocState } from "@/lib/docModel";
+import type { DocHeading, DocState } from "@/lib/docModel";
 import { normalizeInput } from "@/lib/normalize";
-import { parseNormalizedText } from "@/lib/parse";
-import { renderSafePreview } from "@/lib/render";
+import { parseMarkdownToHtml } from "@/lib/parse";
 import { SAMPLES } from "@/lib/samples";
 
 export default function HomePage() {
   const [rawText, setRawText] = useState<string>("");
   const [showNormalized, setShowNormalized] = useState<boolean>(false);
+  const [renderedHtml, setRenderedHtml] = useState<string>("");
+  const [headings, setHeadings] = useState<DocHeading[]>([]);
+  const [parseError, setParseError] = useState<string | null>(null);
 
   const { normalizedText, notes } = useMemo(() => normalizeInput(rawText), [rawText]);
-  const parseResult = useMemo(
-    () => parseNormalizedText(normalizedText),
-    [normalizedText],
-  );
-  const renderedPreview = useMemo(
-    () => renderSafePreview(parseResult.parseOutput),
-    [parseResult.parseOutput],
-  );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      try {
+        setParseError(null);
+        const res = await parseMarkdownToHtml(normalizedText);
+        if (!cancelled) {
+          setRenderedHtml(res.html);
+          setHeadings(res.headings);
+        }
+      } catch (e: unknown) {
+        if (!cancelled) {
+          const message = e instanceof Error ? e.message : "Parse error";
+          setParseError(message);
+          setRenderedHtml("");
+          setHeadings([]);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [normalizedText]);
 
   const docState: DocState = useMemo(
     () => ({
       rawText,
       normalizedText,
-      renderedPreview,
+      headings,
+      renderedPreview: renderedHtml,
     }),
-    [rawText, normalizedText, renderedPreview],
+    [rawText, normalizedText, headings, renderedHtml],
   );
 
   return (
@@ -74,10 +95,11 @@ export default function HomePage() {
                     ) : (
                       notes.map((n, i) => <li key={i}>{n}</li>)
                     )}
-                    {parseResult.notes.map((n, i) => (
-                      <li key={`parse-${i}`}>{n}</li>
-                    ))}
                   </ul>
+                  <div className="mb-2 text-xs text-gray-500">
+                    Headings detected: {docState.headings.length}
+                    {parseError ? ` • Parse error: ${parseError}` : ""}
+                  </div>
                   <div className="mb-2 text-xs font-semibold text-gray-700">
                     Normalized text
                   </div>
@@ -87,7 +109,7 @@ export default function HomePage() {
                 </div>
               </div>
             ) : (
-              <PreviewPane rendered={docState.renderedPreview} />
+              <PreviewPane renderedHtml={docState.renderedPreview} />
             )}
           </div>
         </div>
