@@ -16,7 +16,10 @@ export default function HomePage() {
   const [headings, setHeadings] = useState<DocHeading[]>([]);
   const [parseError, setParseError] = useState<string | null>(null);
 
-  const { normalizedText, notes } = useMemo(() => normalizeInput(rawText), [rawText]);
+  const { normalizedText, notes, stats } = useMemo(
+    () => normalizeInput(rawText),
+    [rawText],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -96,9 +99,17 @@ export default function HomePage() {
                       notes.map((n, i) => <li key={i}>{n}</li>)
                     )}
                   </ul>
+                  <div className="mb-2 text-xs text-gray-600">
+                    <span className="font-semibold">Stats:</span> fences=
+                    {stats.fencesAutoClosed}, headings={stats.headingsFixed},
+                    bullets={stats.bulletsNormalized}, numbering=
+                    {stats.numberingNormalized}, cmdBlocks=
+                    {stats.commandBlocksCreated}, mermaid=
+                    {stats.mermaidBlocksCreated}
+                  </div>
                   <div className="mb-2 text-xs text-gray-500">
                     Headings detected: {docState.headings.length}
-                    {parseError ? ` • Parse error: ${parseError}` : ""}
+                    {parseError ? ` | Parse error: ${parseError}` : ""}
                   </div>
                   <div className="mb-2 text-xs font-semibold text-gray-700">
                     Normalized text

@@ -16,7 +16,17 @@ export type DocState = {
   renderedPreview: string; // HTML (Phase 3+)
 };
 
+export type NormalizeStats = {
+  fencesAutoClosed: number;
+  headingsFixed: number;
+  bulletsNormalized: number;
+  numberingNormalized: number;
+  commandBlocksCreated: number;
+  mermaidBlocksCreated: number;
+};
+
 export type NormalizeResult = {
   normalizedText: string;
   notes: string[]; // useful later for logging what got fixed
+  stats: NormalizeStats;
 };
