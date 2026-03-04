@@ -4,8 +4,10 @@ type Props = {
   onGeneratePdf: () => void;
   onDownloadPdf: () => void;
   onToggleSettings: () => void;
+  onToggleOptimizer: () => void;
   isGenerating: boolean;
   hasPdf: boolean;
+  suggestionCount: number;
   statusText?: string | null;
 };
 
@@ -46,8 +48,10 @@ export default function TopBar({
   onGeneratePdf,
   onDownloadPdf,
   onToggleSettings,
+  onToggleOptimizer,
   isGenerating,
   hasPdf,
+  suggestionCount,
   statusText,
 }: Props) {
   return (
@@ -88,6 +92,13 @@ export default function TopBar({
 
           <GlassButton onClick={onToggleSettings} title="Export settings">
             Settings
+          </GlassButton>
+
+          <GlassButton
+            onClick={onToggleOptimizer}
+            title="Layout optimizer (suggestions)"
+          >
+            Optimizer {suggestionCount > 0 ? `(${suggestionCount})` : ""}
           </GlassButton>
         </div>
       </div>

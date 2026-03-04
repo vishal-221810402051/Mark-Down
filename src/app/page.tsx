@@ -8,11 +8,14 @@ import SettingsPanel, {
   type MarginPreset,
   type Theme,
 } from "@/components/SettingsPanel";
+import SuggestionsPanel from "@/components/SuggestionsPanel";
 import TopBar from "@/components/TopBar";
 import type { DocHeading, DocState } from "@/lib/docModel";
 import { normalizeInput } from "@/lib/normalize";
 import { parseMarkdownToHtml } from "@/lib/parse";
 import { SAMPLES } from "@/lib/samples";
+import { generateSuggestions } from "@/lib/suggestions/engine";
+import type { Suggestion } from "@/lib/suggestions/types";
 
 export default function HomePage() {
   const [rawText, setRawText] = useState<string>("");
@@ -25,6 +28,13 @@ export default function HomePage() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [docTitle, setDocTitle] = useState("Mark-Down Document");
   const [marginPreset, setMarginPreset] = useState<MarginPreset>("normal");
+
+  const [optimizerOpen, setOptimizerOpen] = useState(false);
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+
+  const [normalizedOverride, setNormalizedOverride] = useState<string | null>(null);
+  const [rawBaseline, setRawBaseline] = useState<string | null>(null);
+  const [normBaseline, setNormBaseline] = useState<string | null>(null);
 
   const [renderedHtml, setRenderedHtml] = useState<string>("");
   const [headings, setHeadings] = useState<DocHeading[]>([]);
@@ -42,13 +52,15 @@ export default function HomePage() {
     [rawText],
   );
 
+  const effectiveNormalized = normalizedOverride ?? normalizedText;
+
   useEffect(() => {
     let cancelled = false;
 
     (async () => {
       try {
         setParseError(null);
-        const res = await parseMarkdownToHtml(normalizedText, {
+        const res = await parseMarkdownToHtml(effectiveNormalized, {
           includeToc,
           tocMaxDepth: tocDepth,
         });
@@ -69,7 +81,11 @@ export default function HomePage() {
     return () => {
       cancelled = true;
     };
-  }, [normalizedText, includeToc, tocDepth]);
+  }, [effectiveNormalized, includeToc, tocDepth]);
+
+  useEffect(() => {
+    setSuggestions(generateSuggestions(rawText, normalizedText));
+  }, [rawText, normalizedText]);
 
   useEffect(() => {
     return () => {
@@ -80,12 +96,68 @@ export default function HomePage() {
   const docState: DocState = useMemo(
     () => ({
       rawText,
-      normalizedText,
+      normalizedText: effectiveNormalized,
       headings,
       renderedPreview: renderedHtml,
     }),
-    [rawText, normalizedText, headings, renderedHtml],
+    [rawText, effectiveNormalized, headings, renderedHtml],
   );
+
+  function applySuggestionToRaw(s: Suggestion) {
+    const p = s.patches.find((x) => x.target === "raw");
+    if (!p) return;
+
+    if (rawBaseline === null) setRawBaseline(rawText);
+
+    const next = p.apply(rawText);
+    setRawText(next);
+  }
+
+  function applySuggestionToNormalized(s: Suggestion) {
+    const p = s.patches.find((x) => x.target === "normalized");
+    if (!p) return;
+
+    if (normBaseline === null) setNormBaseline(effectiveNormalized);
+
+    const next = p.apply(effectiveNormalized);
+    setNormalizedOverride(next);
+  }
+
+  function applyAllRaw() {
+    if (suggestions.length === 0) return;
+    if (rawBaseline === null) setRawBaseline(rawText);
+
+    let t = rawText;
+    for (const s of suggestions) {
+      const p = s.patches.find((x) => x.target === "raw");
+      if (p) t = p.apply(t);
+    }
+    setRawText(t);
+  }
+
+  function applyAllNormalized() {
+    if (suggestions.length === 0) return;
+    if (normBaseline === null) setNormBaseline(effectiveNormalized);
+
+    let t = effectiveNormalized;
+    for (const s of suggestions) {
+      const p = s.patches.find((x) => x.target === "normalized");
+      if (p) t = p.apply(t);
+    }
+    setNormalizedOverride(t);
+  }
+
+  function revertRaw() {
+    if (rawBaseline === null) return;
+    setRawText(rawBaseline);
+    setRawBaseline(null);
+  }
+
+  function revertNormalized() {
+    if (normBaseline === null) return;
+    setNormalizedOverride(normBaseline);
+    setNormBaseline(null);
+  }
 
   async function handleGeneratePdf() {
     if (!rawText.trim()) {
@@ -107,7 +179,7 @@ export default function HomePage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          markdown: rawText,
+          markdown: effectiveNormalized,
           title: docTitle,
           theme,
           includeToc,
@@ -158,8 +230,10 @@ export default function HomePage() {
         onGeneratePdf={handleGeneratePdf}
         onDownloadPdf={handleDownloadPdf}
         onToggleSettings={() => setSettingsOpen(true)}
+        onToggleOptimizer={() => setOptimizerOpen(true)}
         isGenerating={isGenerating}
         hasPdf={!!pdfUrl}
+        suggestionCount={suggestions.length}
         statusText={statusText}
       />
 
@@ -217,7 +291,7 @@ export default function HomePage() {
                     {parseError ? ` | Parse error: ${parseError}` : ""}
                   </div>
                   <div className="mb-2 text-xs font-semibold text-gray-700">
-                    Normalized text
+                    Effective normalized text
                   </div>
                   <pre className="whitespace-pre-wrap break-words rounded-md bg-gray-50 p-3 text-xs leading-5">
                     {docState.normalizedText}
@@ -244,6 +318,22 @@ export default function HomePage() {
         setTocDepth={setTocDepth}
         marginPreset={marginPreset}
         setMarginPreset={setMarginPreset}
+      />
+
+      <SuggestionsPanel
+        open={optimizerOpen}
+        onClose={() => setOptimizerOpen(false)}
+        suggestions={suggestions}
+        rawText={rawText}
+        normalizedText={effectiveNormalized}
+        onApplyRaw={applySuggestionToRaw}
+        onApplyNormalized={applySuggestionToNormalized}
+        onApplyAllRaw={applyAllRaw}
+        onApplyAllNormalized={applyAllNormalized}
+        onRevertRaw={revertRaw}
+        onRevertNormalized={revertNormalized}
+        hasRawBaseline={rawBaseline !== null}
+        hasNormalizedBaseline={normBaseline !== null}
       />
     </div>
   );
