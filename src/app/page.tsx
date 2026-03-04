@@ -13,6 +13,8 @@ export default function HomePage() {
   const [rawText, setRawText] = useState<string>("");
   const [showNormalized, setShowNormalized] = useState<boolean>(false);
   const [theme, setTheme] = useState<PreviewTheme>("whitepaper");
+  const [includeToc, setIncludeToc] = useState<boolean>(true);
+  const [tocDepth, setTocDepth] = useState<2 | 3 | 4>(3);
   const [renderedHtml, setRenderedHtml] = useState<string>("");
   const [headings, setHeadings] = useState<DocHeading[]>([]);
   const [parseError, setParseError] = useState<string | null>(null);
@@ -28,7 +30,10 @@ export default function HomePage() {
     (async () => {
       try {
         setParseError(null);
-        const res = await parseMarkdownToHtml(normalizedText);
+        const res = await parseMarkdownToHtml(normalizedText, {
+          includeToc,
+          tocMaxDepth: tocDepth,
+        });
         if (!cancelled) {
           setRenderedHtml(res.html);
           setHeadings(res.headings);
@@ -46,7 +51,7 @@ export default function HomePage() {
     return () => {
       cancelled = true;
     };
-  }, [normalizedText]);
+  }, [normalizedText, includeToc, tocDepth]);
 
   const docState: DocState = useMemo(
     () => ({
@@ -87,6 +92,29 @@ export default function HomePage() {
                     <option value="whitepaper">Whitepaper</option>
                     <option value="dev">Developer Docs</option>
                     <option value="academic">Academic</option>
+                  </select>
+                </label>
+
+                <label className="flex items-center gap-2 text-xs text-gray-600">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4"
+                    checked={includeToc}
+                    onChange={(e) => setIncludeToc(e.target.checked)}
+                  />
+                  Include TOC
+                </label>
+
+                <label className="flex items-center gap-2 text-xs text-gray-600">
+                  <span>TOC depth</span>
+                  <select
+                    value={tocDepth}
+                    onChange={(e) => setTocDepth(Number(e.target.value) as 2 | 3 | 4)}
+                    className="rounded-md border bg-white px-2 py-1 text-xs"
+                  >
+                    <option value={2}>H2</option>
+                    <option value={3}>H3</option>
+                    <option value={4}>H4</option>
                   </select>
                 </label>
 
