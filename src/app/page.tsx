@@ -18,6 +18,9 @@ export default function HomePage() {
   const [renderedHtml, setRenderedHtml] = useState<string>("");
   const [headings, setHeadings] = useState<DocHeading[]>([]);
   const [parseError, setParseError] = useState<string | null>(null);
+  const [isGenerating, setIsGenerating] = useState<boolean>(false);
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [pdfName, setPdfName] = useState<string>("document.pdf");
 
   const { normalizedText, notes, stats } = useMemo(
     () => normalizeInput(rawText),
@@ -53,6 +56,12 @@ export default function HomePage() {
     };
   }, [normalizedText, includeToc, tocDepth]);
 
+  useEffect(() => {
+    return () => {
+      if (pdfUrl) URL.revokeObjectURL(pdfUrl);
+    };
+  }, [pdfUrl]);
+
   const docState: DocState = useMemo(
     () => ({
       rawText,
@@ -63,9 +72,60 @@ export default function HomePage() {
     [rawText, normalizedText, headings, renderedHtml],
   );
 
+  async function handleGeneratePdf() {
+    if (!rawText.trim()) return;
+
+    setIsGenerating(true);
+    try {
+      if (pdfUrl) URL.revokeObjectURL(pdfUrl);
+
+      const title = "Mark-Down_Document";
+      const res = await fetch("/api/pdf", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          markdown: rawText,
+          title,
+          theme,
+          includeToc,
+          tocDepth,
+        }),
+      });
+
+      if (!res.ok) {
+        const err = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(err.error ?? "PDF API failed");
+      }
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      setPdfUrl(url);
+      setPdfName(`${title}.pdf`);
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : "PDF generation failed";
+      window.alert(message);
+      setPdfUrl(null);
+    } finally {
+      setIsGenerating(false);
+    }
+  }
+
+  function handleDownloadPdf() {
+    if (!pdfUrl) return;
+    const a = document.createElement("a");
+    a.href = pdfUrl;
+    a.download = pdfName;
+    a.click();
+  }
+
   return (
     <div className="min-h-screen bg-white">
-      <TopBar />
+      <TopBar
+        onGeneratePdf={handleGeneratePdf}
+        onDownloadPdf={handleDownloadPdf}
+        isGenerating={isGenerating}
+        hasPdf={!!pdfUrl}
+      />
 
       <main className="mx-auto grid max-w-7xl grid-cols-1 gap-4 px-4 py-4 lg:grid-cols-2">
         <div className="h-[calc(100vh-6.5rem)] overflow-hidden rounded-lg border">
