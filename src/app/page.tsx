@@ -4,61 +4,34 @@ import { useMemo, useState } from "react";
 import EditorPane from "@/components/EditorPane";
 import PreviewPane from "@/components/PreviewPane";
 import TopBar from "@/components/TopBar";
-
-const SAMPLES: Record<string, string> = {
-  basic: `# Title
-## Section
-This is a paragraph.
-
-- Bullet 1
-- Bullet 2
-
-\`\`\`python
-def hello():
-    print("Hello")
-\`\`\`
-`,
-  chatgpt: `Title:
-My Doc
-
-Section: Installation
-pip install fastapi
-uvicorn app:main --reload
-
-Notes:
-• this bullet uses a dot
-1) this numbering uses a bracket
-
-Flow:
-A -> B -> C
-`,
-  tables: `# Data Summary
-
-Name    Age    City
-John    21     Paris
-Anna    30     Berlin
-
-- Alpha
-- Beta
-  - Nested 1
-  - Nested 2
-`,
-  mermaid: `# Architecture
-
-\`\`\`mermaid
-graph TD
-  A[User] --> B[Web App]
-  B --> C[Parser]
-  C --> D[HTML Renderer]
-  D --> E[PDF Engine]
-\`\`\`
-`,
-};
+import type { DocState } from "@/lib/docModel";
+import { normalizeInput } from "@/lib/normalize";
+import { parseNormalizedText } from "@/lib/parse";
+import { renderSafePreview } from "@/lib/render";
+import { SAMPLES } from "@/lib/samples";
 
 export default function HomePage() {
   const [rawText, setRawText] = useState<string>("");
+  const [showNormalized, setShowNormalized] = useState<boolean>(false);
 
-  const previewText = useMemo(() => rawText, [rawText]);
+  const { normalizedText, notes } = useMemo(() => normalizeInput(rawText), [rawText]);
+  const parseResult = useMemo(
+    () => parseNormalizedText(normalizedText),
+    [normalizedText],
+  );
+  const renderedPreview = useMemo(
+    () => renderSafePreview(parseResult.parseOutput),
+    [parseResult.parseOutput],
+  );
+
+  const docState: DocState = useMemo(
+    () => ({
+      rawText,
+      normalizedText,
+      renderedPreview,
+    }),
+    [rawText, normalizedText, renderedPreview],
+  );
 
   return (
     <div className="min-h-screen bg-white">
@@ -67,14 +40,56 @@ export default function HomePage() {
       <main className="mx-auto grid max-w-7xl grid-cols-1 gap-4 px-4 py-4 lg:grid-cols-2">
         <div className="h-[calc(100vh-6.5rem)] overflow-hidden rounded-lg border">
           <EditorPane
-            value={rawText}
+            value={docState.rawText}
             onChange={setRawText}
             onLoadSample={(id) => setRawText(SAMPLES[id] ?? "")}
           />
         </div>
 
         <div className="h-[calc(100vh-6.5rem)] overflow-hidden rounded-lg border">
-          <PreviewPane raw={previewText} />
+          <div className="flex h-full flex-col">
+            <div className="flex items-center justify-between border-b px-3 py-2">
+              <div className="text-sm font-semibold">Preview</div>
+
+              <label className="flex items-center gap-2 text-xs text-gray-600">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4"
+                  checked={showNormalized}
+                  onChange={(e) => setShowNormalized(e.target.checked)}
+                />
+                Show normalized
+              </label>
+            </div>
+
+            {showNormalized ? (
+              <div className="flex-1 overflow-auto bg-gray-50 p-3">
+                <div className="rounded-lg border bg-white p-3">
+                  <div className="mb-2 text-xs font-semibold text-gray-700">
+                    Normalizer notes
+                  </div>
+                  <ul className="mb-3 list-disc pl-5 text-xs text-gray-600">
+                    {notes.length === 0 ? (
+                      <li>None</li>
+                    ) : (
+                      notes.map((n, i) => <li key={i}>{n}</li>)
+                    )}
+                    {parseResult.notes.map((n, i) => (
+                      <li key={`parse-${i}`}>{n}</li>
+                    ))}
+                  </ul>
+                  <div className="mb-2 text-xs font-semibold text-gray-700">
+                    Normalized text
+                  </div>
+                  <pre className="whitespace-pre-wrap break-words rounded-md bg-gray-50 p-3 text-xs leading-5">
+                    {docState.normalizedText}
+                  </pre>
+                </div>
+              </div>
+            ) : (
+              <PreviewPane rendered={docState.renderedPreview} />
+            )}
+          </div>
         </div>
       </main>
     </div>

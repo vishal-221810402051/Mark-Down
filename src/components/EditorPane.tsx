@@ -1,5 +1,7 @@
 "use client";
 
+import Editor from "@monaco-editor/react";
+
 type Props = {
   value: string;
   onChange: (next: string) => void;
@@ -32,18 +34,27 @@ export default function EditorPane({ value, onChange, onLoadSample }: Props) {
         </div>
       </div>
 
-      <div className="flex-1 p-3">
-        <textarea
+      <div className="flex-1">
+        <Editor
+          height="100%"
+          defaultLanguage="markdown"
           value={value}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder="Paste your ChatGPT / Markdown-like documentation here…"
-          className="h-full w-full resize-none rounded-lg border bg-white p-3 font-mono text-sm leading-6 outline-none focus:ring-2 focus:ring-black/10"
-          spellCheck={false}
+          onChange={(v) => onChange(v ?? "")}
+          options={{
+            wordWrap: "on",
+            minimap: { enabled: false },
+            fontSize: 13,
+            lineHeight: 20,
+            tabSize: 2,
+            scrollBeyondLastLine: false,
+            renderLineHighlight: "none",
+            automaticLayout: true,
+          }}
         />
       </div>
 
       <div className="border-t px-3 py-2 text-xs text-gray-500">
-        Phase 1: layout shell. Parsing/formatting comes in Phase 3+.
+        Phase 2: Monaco editor + doc pipeline scaffold.
       </div>
     </section>
   );
