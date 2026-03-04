@@ -15,7 +15,18 @@ type PdfReq = {
   theme?: "whitepaper" | "dev" | "academic";
   includeToc?: boolean;
   tocDepth?: 2 | 3 | 4;
+  marginPreset?: "compact" | "normal" | "spacious";
 };
+
+function marginsForPreset(p: "compact" | "normal" | "spacious") {
+  if (p === "compact") {
+    return { top: "18mm", right: "14mm", bottom: "18mm", left: "14mm" };
+  }
+  if (p === "spacious") {
+    return { top: "28mm", right: "22mm", bottom: "28mm", left: "22mm" };
+  }
+  return { top: "24mm", right: "18mm", bottom: "24mm", left: "18mm" };
+}
 
 function getDocCss(): string {
   const cssPath = path.join(process.cwd(), "src", "app", "doc.css");
@@ -65,10 +76,11 @@ function buildFullHtml(opts: {
   title: string;
   theme: "whitepaper" | "dev" | "academic";
   bodyHtml: string;
+  margins: { top: string; right: string; bottom: string; left: string };
 }): string {
   const docCss = getDocCss();
   const printCss = `
-@page { size: A4; margin: 24mm 18mm; }
+@page { size: A4; margin: ${opts.margins.top} ${opts.margins.right} ${opts.margins.bottom} ${opts.margins.left}; }
 * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 .mermaid-svg {
   margin: 1rem 0;
@@ -110,6 +122,8 @@ export async function POST(req: Request) {
   const theme: "whitepaper" | "dev" | "academic" = body.theme ?? "whitepaper";
   const includeToc = body.includeToc ?? true;
   const tocDepth = (body.tocDepth ?? 3) as 2 | 3 | 4;
+  const marginPreset = body.marginPreset ?? "normal";
+  const margins = marginsForPreset(marginPreset);
   const title = (body.title ?? "Mark-Down Document").toString();
 
   try {
@@ -125,6 +139,7 @@ export async function POST(req: Request) {
       title,
       theme,
       bodyHtml: htmlWithDiagrams,
+      margins,
     });
 
     const browser = await chromium.launch();
@@ -133,7 +148,7 @@ export async function POST(req: Request) {
       await page.setContent(fullHtml, { waitUntil: "networkidle" });
 
       const footerTemplate = `
-<div style="width:100%; font-size:9px; color:#6b7280; padding:0 18mm;">
+<div style="width:100%; font-size:9px; color:#6b7280; padding:0 ${margins.right};">
   <div style="width:100%; display:flex; justify-content:space-between;">
     <span>${escapeHtml(title)}</span>
     <span>Page <span class="pageNumber"></span> of <span class="totalPages"></span></span>
@@ -146,12 +161,7 @@ export async function POST(req: Request) {
         displayHeaderFooter: true,
         headerTemplate: "<div></div>",
         footerTemplate,
-        margin: {
-          top: "24mm",
-          right: "18mm",
-          bottom: "24mm",
-          left: "18mm",
-        },
+        margin: margins,
       });
 
       return new NextResponse(new Uint8Array(pdf), {
