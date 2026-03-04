@@ -1,11 +1,18 @@
 "use client";
 
+export type PreviewTheme = "whitepaper" | "dev" | "academic";
+
 type Props = {
   title?: string;
   renderedHtml: string; // sanitized HTML
+  theme: PreviewTheme;
 };
 
-export default function PreviewPane({ title = "Preview", renderedHtml }: Props) {
+export default function PreviewPane({
+  title = "Preview",
+  renderedHtml,
+  theme,
+}: Props) {
   return (
     <section className="flex h-full flex-col">
       <div className="flex items-center justify-between border-b px-3 py-2">
@@ -18,11 +25,11 @@ export default function PreviewPane({ title = "Preview", renderedHtml }: Props) 
           <div className="px-10 py-12">
             {renderedHtml.trim().length === 0 ? (
               <div className="text-sm text-gray-400">
-                Preview will appear here as you type…
+                Preview will appear here as you type...
               </div>
             ) : (
               <article
-                className="doc"
+                className={`doc theme-${theme}`}
                 dangerouslySetInnerHTML={{ __html: renderedHtml }}
               />
             )}
@@ -31,7 +38,7 @@ export default function PreviewPane({ title = "Preview", renderedHtml }: Props) 
       </div>
 
       <div className="border-t px-3 py-2 text-xs text-gray-500">
-        Phase 3: Markdown → HTML rendering.
+        Phase 5: polished doc typography and themes.
       </div>
     </section>
   );

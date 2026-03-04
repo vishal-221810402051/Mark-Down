@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import EditorPane from "@/components/EditorPane";
-import PreviewPane from "@/components/PreviewPane";
+import PreviewPane, { type PreviewTheme } from "@/components/PreviewPane";
 import TopBar from "@/components/TopBar";
 import type { DocHeading, DocState } from "@/lib/docModel";
 import { normalizeInput } from "@/lib/normalize";
@@ -12,6 +12,7 @@ import { SAMPLES } from "@/lib/samples";
 export default function HomePage() {
   const [rawText, setRawText] = useState<string>("");
   const [showNormalized, setShowNormalized] = useState<boolean>(false);
+  const [theme, setTheme] = useState<PreviewTheme>("whitepaper");
   const [renderedHtml, setRenderedHtml] = useState<string>("");
   const [headings, setHeadings] = useState<DocHeading[]>([]);
   const [parseError, setParseError] = useState<string | null>(null);
@@ -75,15 +76,30 @@ export default function HomePage() {
             <div className="flex items-center justify-between border-b px-3 py-2">
               <div className="text-sm font-semibold">Preview</div>
 
-              <label className="flex items-center gap-2 text-xs text-gray-600">
-                <input
-                  type="checkbox"
-                  className="h-4 w-4"
-                  checked={showNormalized}
-                  onChange={(e) => setShowNormalized(e.target.checked)}
-                />
-                Show normalized
-              </label>
+              <div className="flex items-center gap-3">
+                <label className="flex items-center gap-2 text-xs text-gray-600">
+                  <span>Theme</span>
+                  <select
+                    value={theme}
+                    onChange={(e) => setTheme(e.target.value as PreviewTheme)}
+                    className="rounded-md border bg-white px-2 py-1 text-xs"
+                  >
+                    <option value="whitepaper">Whitepaper</option>
+                    <option value="dev">Developer Docs</option>
+                    <option value="academic">Academic</option>
+                  </select>
+                </label>
+
+                <label className="flex items-center gap-2 text-xs text-gray-600">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4"
+                    checked={showNormalized}
+                    onChange={(e) => setShowNormalized(e.target.checked)}
+                  />
+                  Show normalized
+                </label>
+              </div>
             </div>
 
             {showNormalized ? (
@@ -120,7 +136,7 @@ export default function HomePage() {
                 </div>
               </div>
             ) : (
-              <PreviewPane renderedHtml={docState.renderedPreview} />
+              <PreviewPane renderedHtml={docState.renderedPreview} theme={theme} />
             )}
           </div>
         </div>
