@@ -47,6 +47,8 @@ function looksLikeCodeStart(line: string): boolean {
   const s = line.trim();
   if (!s) return false;
   return (
+    /^\/\//.test(s) ||
+    /^#/.test(s) ||
     /^(function\b|const\b|let\b|var\b|class\b|interface\b|type\b|import\b|export\b|def\b|from\b|if\b|for\b|while\b|try\b|switch\b)/.test(
       s,
     ) ||
@@ -146,8 +148,64 @@ function isBlockBoundary(line: string): boolean {
   return (
     /^\s*#{1,6}\s+/.test(line) ||
     /^\s*[-*]\s+/.test(line) ||
-    /^\s*\d+\.\s+/.test(line)
+    /^\s*\d+\.\s+/.test(line) ||
+    /^\s*>/.test(line) ||
+    /^\s*---+\s*$/.test(line) ||
+    isFenceOpenLine(line) !== null
   );
+}
+
+function isMarkdownHeading(line: string): boolean {
+  return /^\s*#{1,6}\s+/.test(line);
+}
+
+function isNumberHeading(line: string): boolean {
+  return /^\s*\d+(?:\.\d+)*\s+/.test(line);
+}
+
+function isStrongBoundary(line: string): boolean {
+  // Do NOT include "# " because it appears in bash/python comments.
+  return (
+    /^\s*#{2,6}\s+/.test(line) ||
+    /^\s*\d+\.\d+/.test(line) ||
+    /^\s*\d+(?:\.\d+)*\)\s+/.test(line) ||
+    /^\s*(Section|Subsection):\s+/i.test(line)
+  );
+}
+
+function fenceHasLanguage(openFenceLine: string): boolean {
+  // ```bash / ```ts / ```python etc.
+  return /^\s*```[\w-]+\s*$/.test(openFenceLine);
+}
+
+function isBlockquote(line: string): boolean {
+  return /^\s*>/.test(line);
+}
+
+function isSeparator(line: string): boolean {
+  return /^\s*---+\s*$/.test(line);
+}
+
+function looksAsciiDiagram(line: string): boolean {
+  return /^[+|\- ]{5,}/.test(line);
+}
+
+function isListLine(line: string): boolean {
+  return /^\s*[-*+]\s+/.test(line) || /^\s*\d+\.\s+/.test(line);
+}
+
+function detectTableHeader(line: string): { mode: "spacing" | "pipes"; cols: string[] } | null {
+  const pipes = splitColumnsByPipes(line);
+  if (pipes.length >= 2) return { mode: "pipes", cols: pipes };
+
+  const spacing = splitColumnsBySpacing(line);
+  if (spacing.length >= 2) return { mode: "spacing", cols: spacing };
+
+  // Fallback: 3+ space-separated tokens can still be a table header.
+  const fallback = line.trim().split(/\s{1,}/);
+  if (fallback.length >= 3) return { mode: "spacing", cols: fallback };
+
+  return null;
 }
 
 function isLikelyCommand(line: string): boolean {
@@ -201,11 +259,46 @@ export function normalizeInput(rawText: string): NormalizeResult {
 
   // 1) Heading + bullet/number normalization.
   const out1: string[] = [];
+  let inFence0 = false;
   for (let i = 0; i < lines.length; i++) {
     let line = lines[i] ?? "";
 
-    if (/^\s*[•–]\s+/.test(line)) {
-      line = line.replace(/^\s*[•–]\s+/, "- ");
+    if (inFence0) {
+      out1.push(line);
+      if (isFenceCloseLine(line)) inFence0 = false;
+      continue;
+    }
+
+    const openFenceLang = isFenceOpenLine(line);
+    if (openFenceLang !== null) {
+      inFence0 = true;
+      out1.push(line);
+      continue;
+    }
+
+    // Treat "# ..." as heading only when separated by a blank line.
+    if (/^\s*#\s+/.test(line)) {
+      const prev = (lines[i - 1] ?? "").trim();
+      if (prev !== "") {
+        out1.push(line);
+        continue;
+      }
+    }
+
+    if (
+      isMarkdownHeading(line) ||
+      isNumberHeading(line) ||
+      isBlockquote(line) ||
+      isSeparator(line) ||
+      isListLine(line) ||
+      looksAsciiDiagram(line)
+    ) {
+      out1.push(line);
+      continue;
+    }
+
+    if (/^\s*[\u2022\u2013]\s+/.test(line)) {
+      line = line.replace(/^\s*[\u2022\u2013]\s+/, "- ");
       stats.bulletsNormalized++;
     }
 
@@ -287,11 +380,57 @@ export function normalizeInput(rawText: string): NormalizeResult {
     notes.push(`Merged ${mergedListGaps} blank line gap(s) inside lists`);
   }
 
+  // 1c) Close unclosed fenced blocks at strong boundaries.
+  const out1c: string[] = [];
+  let inFenceC = false;
+  let fenceOpenLine = "";
+
+  for (let i = 0; i < out1b.length; i++) {
+    const line = out1b[i] ?? "";
+
+    if (!inFenceC) {
+      const open = isFenceOpenLine(line);
+      if (open !== null) {
+        inFenceC = true;
+        fenceOpenLine = line;
+        out1c.push(line);
+        continue;
+      }
+
+      out1c.push(line);
+      continue;
+    }
+
+    // inside fence
+    if (inFenceC && isFenceCloseLine(line)) {
+      inFenceC = false;
+      fenceOpenLine = "";
+      out1c.push(line);
+      continue;
+    }
+
+    // If user forgot closing fence, close it before strong boundary lines.
+    if (fenceHasLanguage(fenceOpenLine) && isStrongBoundary(line)) {
+      out1c.push("```");
+      out1c.push("");
+      stats.fencesAutoClosed++;
+      notes.push("Auto-closed unclosed fenced block before strong section boundary");
+      inFenceC = false;
+      fenceOpenLine = "";
+
+      // Process boundary line in non-fence mode.
+      out1c.push(line);
+      continue;
+    }
+
+    out1c.push(line);
+  }
+
   // 2) Command streaks -> fenced code blocks (outside existing fences only).
   const out2: string[] = [];
   let inFence2 = false;
-  for (let i = 0; i < out1b.length; i++) {
-    const line = out1b[i] ?? "";
+  for (let i = 0; i < out1c.length; i++) {
+    const line = out1c[i] ?? "";
 
     if (isFenceLine(line)) {
       inFence2 = !inFence2;
@@ -304,11 +443,11 @@ export function normalizeInput(rawText: string): NormalizeResult {
       let j = i + 1;
 
       while (
-        j < out1b.length &&
-        (out1b[j] ?? "").trim() &&
-        isLikelyCommand(out1b[j] ?? "")
+        j < out1c.length &&
+        (out1c[j] ?? "").trim() &&
+        isLikelyCommand(out1c[j] ?? "")
       ) {
-        streak.push(out1b[j] ?? "");
+        streak.push(out1c[j] ?? "");
         j++;
       }
 
@@ -417,8 +556,11 @@ export function normalizeInput(rawText: string): NormalizeResult {
       if (looksMermaid) {
         const block: string[] = [line];
         let j = i + 1;
-        while (j < outCodeFenced.length && (outCodeFenced[j] ?? "").trim() !== "") {
-          block.push(outCodeFenced[j] ?? "");
+        while (j < outCodeFenced.length) {
+          const nxt = outCodeFenced[j] ?? "";
+          if (nxt.trim() === "") break;
+          if (isBlockBoundary(nxt)) break;
+          block.push(nxt);
           j++;
         }
         out3.push("```mermaid");
@@ -460,9 +602,16 @@ export function normalizeInput(rawText: string): NormalizeResult {
 
     const block: string[] = [];
     let j = i;
-    while (j < out3.length && (out3[j] ?? "").trim() !== "") {
-      if (isFenceLine(out3[j] ?? "")) break;
-      block.push(out3[j] ?? "");
+    while (j < out3.length) {
+      const l = out3[j] ?? "";
+
+      if (l.trim() === "") break;
+      if (isFenceLine(l)) break;
+      if (isMarkdownHeading(l) || isNumberHeading(l)) break;
+      if (isSeparator(l)) break;
+      if (isBlockquote(l)) break;
+
+      block.push(l);
       j++;
     }
 
@@ -489,18 +638,10 @@ export function normalizeInput(rawText: string): NormalizeResult {
         }
       }
 
-      const headerSpacing = splitColumnsBySpacing(block[0] ?? "");
-      const headerPipes = splitColumnsByPipes(block[0] ?? "");
-
-      const mode =
-        headerSpacing.length >= 2
-          ? "spacing"
-          : headerPipes.length >= 2
-            ? "pipes"
-            : null;
-
-      if (mode) {
-        const header = mode === "spacing" ? headerSpacing : headerPipes;
+      const detectedHeader = detectTableHeader(block[0] ?? "");
+      if (detectedHeader) {
+        const mode = detectedHeader.mode;
+        const header = detectedHeader.cols;
         const colCount = header.length;
 
         const secondLine = block[1] ?? "";
@@ -542,7 +683,7 @@ export function normalizeInput(rawText: string): NormalizeResult {
             outTables.push("");
             stats.tablesConverted++;
             notes.push(
-              `Converted wrapped table (${rows.length} rows × ${colCount} cols) to Markdown table`,
+              `Converted wrapped table (${rows.length} rows x ${colCount} cols) to Markdown table`,
             );
             i = i + consumed - 1;
             continue;
@@ -619,3 +760,6 @@ export function normalizeInput(rawText: string): NormalizeResult {
 
   return { normalizedText, notes, stats };
 }
+
+
+
