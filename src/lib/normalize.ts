@@ -12,8 +12,82 @@ const MERMAID_HINTS = [
   "gantt",
 ];
 
+function isFenceOpenLine(line: string): string | null {
+  // opening fence: ```lang (lang optional)
+  const m = line.match(/^\s*```([\w-]+)?\s*$/);
+  if (!m) return null;
+  return (m[1] ?? "").trim();
+}
+
+function isFenceCloseLine(line: string): boolean {
+  // closing fence must be ONLY ```
+  return /^\s*```\s*$/.test(line);
+}
+
 function isFenceLine(line: string): boolean {
-  return line.trim().startsWith("```");
+  return isFenceOpenLine(line) !== null || isFenceCloseLine(line);
+}
+
+function escapeBackticksInCodeLine(line: string): string {
+  // Neutralize BOL triple-backtick inside code so it cannot end the fence.
+  return line.replace(/^(\s*)```/g, "$1\\`\\`\\`");
+}
+
+function looksLikeCodeLine(line: string): boolean {
+  const s = line.trim();
+  if (!s) return false;
+  return (
+    /^(\#|\/\/|;|\/\*|\*|\}|{|return\b|const\b|let\b|def\b|class\b|import\b|from\b)/.test(
+      s,
+    ) || /^\s{2,}\S+/.test(line)
+  );
+}
+
+function looksLikeCodeStart(line: string): boolean {
+  const s = line.trim();
+  if (!s) return false;
+  return (
+    /^(function\b|const\b|let\b|var\b|class\b|interface\b|type\b|import\b|export\b|def\b|from\b|if\b|for\b|while\b|try\b|switch\b)/.test(
+      s,
+    ) ||
+    /^[@\w$]+\s*=\s*.+/.test(s) ||
+    /[;{}]$/.test(s) ||
+    /=>/.test(s)
+  );
+}
+
+function looksLikeCodeLineGeneric(line: string): boolean {
+  const s = line.trim();
+  if (!s) return false;
+  return (
+    looksLikeCodeLine(line) ||
+    /^[@\w$.[\]()]+\s*[:=]\s*.+/.test(s) ||
+    /^[)\]}]+[,;]?$/.test(s) ||
+    /^<[\w/-]+>/.test(s) ||
+    /[;{}]$/.test(s) ||
+    /=>/.test(s)
+  );
+}
+
+function guessCodeLang(lines: string[]): string {
+  const text = lines.join("\n");
+
+  if (/^\s*[{[]/.test(lines[0] ?? "") && /"\w+"\s*:/.test(text)) return "json";
+  if (/\b(def|import|from|class)\b/.test(text) && !/[;{}]/.test(text))
+    return "python";
+  if (
+    /\b(function|const|let|var|import|export|return)\b/.test(text) ||
+    /=>/.test(text)
+  ) {
+    return "javascript";
+  }
+  if (/^(PS [A-Z]:\\|[A-Z]:\\.*>|Get-|Set-|New-|Write-)/m.test(text)) {
+    return "powershell";
+  }
+  if (/^(npm|pnpm|yarn|docker|git|curl|wget|\$ |#!\/bin\/(?:ba)?sh)/m.test(text))
+    return "bash";
+
+  return "text";
 }
 
 function splitColumnsBySpacing(line: string): string[] {
@@ -232,11 +306,82 @@ export function normalizeInput(rawText: string): NormalizeResult {
     out2.push(line);
   }
 
+  // 2.5) Auto-fence unfenced multi-line code blocks.
+  const outCodeFenced: string[] = [];
+  let inFenceAuto = false;
+
+  for (let i = 0; i < out2.length; i++) {
+    const line = out2[i] ?? "";
+
+    const openLang = isFenceOpenLine(line);
+    if (openLang !== null) {
+      inFenceAuto = true;
+      outCodeFenced.push(line);
+      continue;
+    }
+    if (inFenceAuto && isFenceCloseLine(line)) {
+      inFenceAuto = false;
+      outCodeFenced.push(line);
+      continue;
+    }
+    if (inFenceAuto) {
+      outCodeFenced.push(line);
+      continue;
+    }
+
+    if (looksLikeCodeStart(line)) {
+      const block: string[] = [line];
+      let j = i + 1;
+      let blankCount = 0;
+
+      while (j < out2.length) {
+        const nxt = out2[j] ?? "";
+
+        if (isFenceOpenLine(nxt) !== null) break;
+        if (/^\s*#{1,6}\s+/.test(nxt)) break;
+        if (/^\s*[-*]\s+/.test(nxt)) break;
+        if (/^\s*\d+\.\s+/.test(nxt)) break;
+
+        if (nxt.trim() === "") {
+          blankCount++;
+          if (blankCount > 1) break;
+          block.push(nxt);
+          j++;
+          continue;
+        }
+
+        blankCount = 0;
+        if (!looksLikeCodeLineGeneric(nxt)) break;
+
+        block.push(nxt);
+        j++;
+      }
+
+      const strongSignals =
+        block.length >= 3 ||
+        block.some((value) => /[;{}]|=>/.test(value)) ||
+        block.some((value) => /^\s{2,}\S+/.test(value));
+
+      if (strongSignals) {
+        const lang = guessCodeLang(block);
+        outCodeFenced.push(`\`\`\`${lang}`);
+        outCodeFenced.push(...block);
+        outCodeFenced.push("```");
+        outCodeFenced.push("");
+        notes.push(`Auto-fenced unfenced code block as \`\`\`${lang}`);
+        i = j - 1;
+        continue;
+      }
+    }
+
+    outCodeFenced.push(line);
+  }
+
   // 3) Mermaid detection outside fenced blocks.
   const out3: string[] = [];
   let inFence3 = false;
-  for (let i = 0; i < out2.length; i++) {
-    const line = out2[i] ?? "";
+  for (let i = 0; i < outCodeFenced.length; i++) {
+    const line = outCodeFenced[i] ?? "";
 
     if (isFenceLine(line)) {
       inFence3 = !inFence3;
@@ -250,8 +395,8 @@ export function normalizeInput(rawText: string): NormalizeResult {
       if (looksMermaid) {
         const block: string[] = [line];
         let j = i + 1;
-        while (j < out2.length && (out2[j] ?? "").trim() !== "") {
-          block.push(out2[j] ?? "");
+        while (j < outCodeFenced.length && (outCodeFenced[j] ?? "").trim() !== "") {
+          block.push(outCodeFenced[j] ?? "");
           j++;
         }
         out3.push("```mermaid");
@@ -360,11 +505,56 @@ export function normalizeInput(rawText: string): NormalizeResult {
 
   const outAfterTables = outTables;
 
+  // 3.75) Fence Repair v2 — prevent accidental fence closure inside code.
+  const outFenceSafe: string[] = [];
+  let inFence5 = false;
+
+  for (let i = 0; i < outAfterTables.length; i++) {
+    const line = outAfterTables[i] ?? "";
+
+    if (!inFence5) {
+      const lang = isFenceOpenLine(line);
+      if (lang !== null) {
+        inFence5 = true;
+        outFenceSafe.push(line);
+        continue;
+      }
+
+      outFenceSafe.push(line);
+      continue;
+    }
+
+    if (isFenceCloseLine(line)) {
+      const n1 = outAfterTables[i + 1] ?? "";
+      const n2 = outAfterTables[i + 2] ?? "";
+      const suspicious =
+        looksLikeCodeLine(n1) && (looksLikeCodeLine(n2) || n2.trim() === "");
+
+      if (suspicious) {
+        outFenceSafe.push(escapeBackticksInCodeLine(line));
+        notes.push(
+          "Prevented suspicious early fence close (treated as code literal)",
+        );
+        continue;
+      }
+
+      inFence5 = false;
+      outFenceSafe.push(line);
+      continue;
+    }
+
+    outFenceSafe.push(escapeBackticksInCodeLine(line));
+  }
+
+  const outFinalBeforeClose = outFenceSafe;
+
   // 4) Fence repair: auto-close unclosed fences at EOF.
-  const fenceCount = outAfterTables.filter((line) => isFenceLine(line)).length;
-  let finalLines = outAfterTables;
+  const fenceCount = outFinalBeforeClose.filter((line) =>
+    /^\s*```/.test(line.trim()),
+  ).length;
+  let finalLines = outFinalBeforeClose;
   if (fenceCount % 2 === 1) {
-    finalLines = [...outAfterTables, "```", ""];
+    finalLines = [...outFinalBeforeClose, "```", ""];
     stats.fencesAutoClosed++;
     notes.push("Auto-closed an unclosed ``` fence at EOF");
   }
