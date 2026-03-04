@@ -89,6 +89,7 @@
 .doc table {
   width: 100%;
   border-collapse: collapse;
+  table-layout: fixed;
   margin: 1rem 0;
   font-size: 0.95em;
   break-inside: avoid;
@@ -100,6 +101,8 @@
   padding: 0.55rem 0.65rem;
   text-align: left;
   vertical-align: top;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .doc th {

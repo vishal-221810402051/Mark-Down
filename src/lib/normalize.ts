@@ -128,6 +128,28 @@ function toMarkdownTable(rows: string[][]): string[] {
   return [headerLine, sepLine, ...bodyLines];
 }
 
+function appendToLastCell(rows: string[][], extraLine: string) {
+  if (rows.length < 2) return;
+  const lastRow = rows[rows.length - 1];
+  if (!lastRow || lastRow.length === 0) return;
+  const idx = lastRow.length - 1;
+  lastRow[idx] = `${lastRow[idx] ?? ""} ${extraLine.trim()}`.trim();
+}
+
+function padRow(row: string[], colCount: number): string[] {
+  const r = row.slice(0, colCount);
+  while (r.length < colCount) r.push("");
+  return r;
+}
+
+function isBlockBoundary(line: string): boolean {
+  return (
+    /^\s*#{1,6}\s+/.test(line) ||
+    /^\s*[-*]\s+/.test(line) ||
+    /^\s*\d+\.\s+/.test(line)
+  );
+}
+
 function isLikelyCommand(line: string): boolean {
   const s = line.trim();
   if (!s) return false;
@@ -467,36 +489,65 @@ export function normalizeInput(rawText: string): NormalizeResult {
         }
       }
 
-      const rowsSpacing = block.map(splitColumnsBySpacing);
-      const rowsPipes = block.map(splitColumnsByPipes);
+      const headerSpacing = splitColumnsBySpacing(block[0] ?? "");
+      const headerPipes = splitColumnsByPipes(block[0] ?? "");
 
-      const spacingColCounts = rowsSpacing.map((row) => row.length);
-      const pipeColCounts = rowsPipes.map((row) => row.length);
+      const mode =
+        headerSpacing.length >= 2
+          ? "spacing"
+          : headerPipes.length >= 2
+            ? "pipes"
+            : null;
 
-      const spacingLikely =
-        Math.min(...spacingColCounts) >= 2 &&
-        new Set(spacingColCounts).size === 1;
+      if (mode) {
+        const header = mode === "spacing" ? headerSpacing : headerPipes;
+        const colCount = header.length;
 
-      const pipesLikely =
-        Math.min(...pipeColCounts) >= 2 &&
-        new Set(pipeColCounts).size === 1;
+        const secondLine = block[1] ?? "";
+        const second =
+          mode === "spacing"
+            ? splitColumnsBySpacing(secondLine)
+            : splitColumnsByPipes(secondLine);
+        const isConfirmed = second.length >= 2;
 
-      const rows = spacingLikely
-        ? rowsSpacing
-        : pipesLikely
-          ? rowsPipes
-          : null;
+        if (isConfirmed) {
+          const rows: string[][] = [header];
+          let consumed = 1;
 
-      if (rows) {
-        const mdTableLines = toMarkdownTable(rows);
-        outTables.push(...mdTableLines);
-        outTables.push("");
-        stats.tablesConverted++;
-        notes.push(
-          `Converted table-like block (${rows.length} rows × ${rows[0].length} cols) to Markdown table`,
-        );
-        i = j - 1;
-        continue;
+          for (let k = 1; k < block.length; k++) {
+            const ln = block[k] ?? "";
+            if (ln.trim() === "") break;
+            if (isBlockBoundary(ln)) break;
+
+            const cols =
+              mode === "spacing" ? splitColumnsBySpacing(ln) : splitColumnsByPipes(ln);
+
+            if (cols.length === colCount) {
+              rows.push(cols);
+              consumed = k + 1;
+            } else if (cols.length >= 2 && cols.length < colCount) {
+              rows.push(padRow(cols, colCount));
+              consumed = k + 1;
+            } else if (cols.length === 1) {
+              appendToLastCell(rows, cols[0] ?? "");
+              consumed = k + 1;
+            } else {
+              break;
+            }
+          }
+
+          if (rows.length >= 2) {
+            const mdTableLines = toMarkdownTable(rows);
+            outTables.push(...mdTableLines);
+            outTables.push("");
+            stats.tablesConverted++;
+            notes.push(
+              `Converted wrapped table (${rows.length} rows × ${colCount} cols) to Markdown table`,
+            );
+            i = i + consumed - 1;
+            continue;
+          }
+        }
       }
     }
 
