@@ -56,6 +56,10 @@
   page-break-inside: avoid;
 }
 
+.doc pre.ascii-diagram {
+  background: #0f172a;
+}
+
 /* Shiki / rehype-pretty-code */
 .doc pre code {
   display: grid;

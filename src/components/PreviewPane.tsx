@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect, useRef } from "react";
+
 export type PreviewTheme = "whitepaper" | "dev" | "academic";
 
 type Props = {
@@ -8,11 +10,82 @@ type Props = {
   theme: PreviewTheme;
 };
 
+function isMermaidCodeBlock(codeEl: Element): boolean {
+  const cls = codeEl.getAttribute("class") ?? "";
+  const dataLang = codeEl.getAttribute("data-language") ?? "";
+  const pre = codeEl.parentElement;
+  const preLang = pre?.getAttribute("data-language") ?? "";
+  return (
+    cls.includes("language-mermaid") ||
+    cls.includes("lang-mermaid") ||
+    dataLang.toLowerCase() === "mermaid" ||
+    preLang.toLowerCase() === "mermaid"
+  );
+}
+
 export default function PreviewPane({
   title = "Preview",
   renderedHtml,
   theme,
 }: Props) {
+  const ref = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const root = ref.current;
+    if (!root) return;
+
+    const codeBlocks = root.querySelectorAll("pre");
+    codeBlocks.forEach((pre) => {
+      const txt = pre.textContent ?? "";
+      const looksAscii =
+        /(\+[-=]{2,}\+)|(\|.{0,40}\|)|(-->)|(==>)|(\b[v^]\b)/.test(txt);
+      if (looksAscii) pre.classList.add("ascii-diagram");
+    });
+
+    const mermaidBlocks = Array.from(root.querySelectorAll("pre > code")).filter(
+      (code) => isMermaidCodeBlock(code),
+    );
+
+    if (mermaidBlocks.length === 0) return;
+
+    mermaidBlocks.forEach(async (codeEl) => {
+      const pre = codeEl.parentElement as HTMLElement | null;
+      if (!pre) return;
+      if (pre.getAttribute("data-mermaid-rendered") === "1") return;
+
+      const code = codeEl.textContent ?? "";
+      pre.setAttribute("data-mermaid-rendered", "1");
+
+      const placeholder = document.createElement("div");
+      placeholder.className =
+        "my-3 rounded-lg border bg-white p-3 text-xs text-gray-500";
+      placeholder.textContent = "Rendering diagram...";
+      pre.replaceWith(placeholder);
+
+      try {
+        const res = await fetch("/api/mermaid", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ code }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(
+            typeof data?.error === "string" ? data.error : "Mermaid render failed",
+          );
+        }
+
+        const wrap = document.createElement("div");
+        wrap.className = "my-4 overflow-auto rounded-lg border bg-white p-3";
+        wrap.innerHTML = data.svg;
+        placeholder.replaceWith(wrap);
+      } catch (e: unknown) {
+        const message = e instanceof Error ? e.message : "unknown error";
+        placeholder.textContent = `Diagram render failed: ${message}`;
+      }
+    });
+  }, [renderedHtml]);
+
   return (
     <section className="flex h-full flex-col">
       <div className="flex items-center justify-between border-b px-3 py-2">
@@ -28,17 +101,19 @@ export default function PreviewPane({
                 Preview will appear here as you type...
               </div>
             ) : (
-              <article
-                className={`doc theme-${theme}`}
-                dangerouslySetInnerHTML={{ __html: renderedHtml }}
-              />
+              <div ref={ref}>
+                <article
+                  className={`doc theme-${theme}`}
+                  dangerouslySetInnerHTML={{ __html: renderedHtml }}
+                />
+              </div>
             )}
           </div>
         </div>
       </div>
 
       <div className="border-t px-3 py-2 text-xs text-gray-500">
-        Phase 5: polished doc typography and themes.
+        Phase 8: Mermaid SVG rendering + ASCII diagram handling.
       </div>
     </section>
   );
