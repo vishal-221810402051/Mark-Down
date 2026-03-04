@@ -121,7 +121,8 @@ export default function HomePage() {
                     bullets={stats.bulletsNormalized}, numbering=
                     {stats.numberingNormalized}, cmdBlocks=
                     {stats.commandBlocksCreated}, mermaid=
-                    {stats.mermaidBlocksCreated}
+                    {stats.mermaidBlocksCreated}, tables=
+                    {stats.tablesConverted}
                   </div>
                   <div className="mb-2 text-xs text-gray-500">
                     Headings detected: {docState.headings.length}

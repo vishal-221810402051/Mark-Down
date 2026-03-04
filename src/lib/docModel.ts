@@ -23,6 +23,7 @@ export type NormalizeStats = {
   numberingNormalized: number;
   commandBlocksCreated: number;
   mermaidBlocksCreated: number;
+  tablesConverted: number;
 };
 
 export type NormalizeResult = {

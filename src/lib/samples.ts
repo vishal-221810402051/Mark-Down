@@ -36,6 +36,16 @@ Anna    30     Berlin
   - Nested 1
   - Nested 2
 `,
+  tables2: `# Tables v2
+
+Name     Age     City
+John     21      Paris
+Anna     30      Berlin
+
+Name | Score | Rank
+A    | 98    | 1
+B    | 87    | 2
+`,
   mermaid: `# Architecture
 
 \`\`\`mermaid

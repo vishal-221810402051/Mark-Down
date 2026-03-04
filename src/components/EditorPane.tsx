@@ -29,6 +29,7 @@ export default function EditorPane({ value, onChange, onLoadSample }: Props) {
             <option value="basic">Basic Markdown</option>
             <option value="chatgpt">ChatGPT-ish Messy</option>
             <option value="tables">Tables + Lists</option>
+            <option value="tables2">Tables v2 (raw formats)</option>
             <option value="mermaid">Mermaid Diagram</option>
           </select>
         </div>
