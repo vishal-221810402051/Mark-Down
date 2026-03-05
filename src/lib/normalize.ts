@@ -492,30 +492,24 @@ export function normalizeInput(rawText: string): NormalizeResult {
       // Collect following non-empty lines until blank line or boundary
       const block: string[] = [];
       let j = i + 1;
+      const isCommandish = (ln: string) =>
+        isLikelyCommand(ln) || /^\s*#\s+/.test(ln) || ln.trim() === "";
 
       while (j < out2.length) {
         const nxt = out2[j] ?? "";
-
-        // Allow blank lines inside command blocks.
-        if (nxt.trim() === "") {
-          block.push("");
-          j++;
-          continue;
-        }
-
-        // Treat "# ..." as shell comments inside an already-detected command region.
-        if (/^\s*#\s+/.test(nxt) && block.some((b) => isLikelyCommand(b))) {
+        if (isFenceLine(nxt)) break;
+        // allow command lines, shell comments, and blanks
+        if (isCommandish(nxt)) {
           block.push(nxt);
           j++;
           continue;
         }
-
-        if (isFenceLine(nxt)) break;
+        // structural boundaries
         if (isMarkdownHeading(nxt) || isNumberHeading(nxt)) break;
         if (isSeparator(nxt) || isBlockquote(nxt)) break;
+        // stop on prose
+        break;
 
-        block.push(nxt);
-        j++;
       }
 
       // Only fence if we have at least 2 lines OR at least one looks like a command

@@ -20,9 +20,14 @@
 }
 
 body {
-  background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background:
+    radial-gradient(1200px 800px at 20% 10%, rgba(99, 102, 241, 0.12), transparent 80%),
+    radial-gradient(900px 500px at 80% 30%, rgba(56, 189, 248, 0.08), transparent 70%),
+    linear-gradient(180deg, #050b18, #020617);
 }
 
 html,
@@ -30,11 +35,81 @@ body {
   height: 100%;
 }
 
-body {
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  background:
-    radial-gradient(1200px 600px at 20% 10%, rgba(255, 255, 255, 0.08), transparent 60%),
-    radial-gradient(900px 500px at 90% 20%, rgba(255, 255, 255, 0.06), transparent 55%),
-    linear-gradient(180deg, #050812 0%, #070b18 60%, #050812 100%);
+/* Glass button base */
+.glass-btn {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(14px);
+  color: rgba(255, 255, 255, 0.85);
+  padding: 6px 14px;
+  border-radius: 12px;
+  font-size: 13px;
+  transition: all 180ms ease;
+}
+
+/* Hover effect */
+.glass-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.22);
+  transform: translateY(-1px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  color: #fff;
+}
+
+/* Active press */
+.glass-btn:active {
+  transform: translateY(0px);
+  box-shadow: none;
+}
+
+/* Primary action (Generate PDF) */
+.glass-btn-primary {
+  background: rgba(99, 102, 241, 0.25);
+  border: 1px solid rgba(99, 102, 241, 0.35);
+}
+
+.glass-btn-primary:hover {
+  background: rgba(99, 102, 241, 0.35);
+}
+
+.doc-card {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(18px);
+  border-radius: 18px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+  transition: transform 160ms ease, box-shadow 160ms ease;
+}
+
+.doc-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.55);
+}
+
+.normalized-panel pre {
+  background: #0b1220;
+  color: #d1d5db;
+  border-radius: 12px;
+  padding: 12px;
+  font-size: 12px;
+  overflow-x: auto;
+}
+
+/* custom scrollbars */
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
 }

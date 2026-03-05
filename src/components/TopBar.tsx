@@ -20,25 +20,16 @@ function GlassButton(props: {
   variant?: "primary" | "secondary";
 }) {
   const { children, onClick, disabled, title, variant = "secondary" } = props;
-
-  const base =
-    "rounded-xl border px-3 py-1.5 text-sm transition backdrop-blur-xl " +
-    "shadow-[0_10px_30px_rgba(0,0,0,0.25)]";
-
   const styles =
-    variant === "primary"
-      ? "border-white/15 bg-white/15 text-white hover:bg-white/20"
-      : "border-white/10 bg-white/5 text-white/80 hover:bg-white/10 hover:text-white";
-
-  const disabledStyles =
-    "disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-white/5";
+    variant === "primary" ? "glass-btn glass-btn-primary" : "glass-btn";
+  const disabledStyles = "disabled:cursor-not-allowed disabled:opacity-50";
 
   return (
     <button
       onClick={onClick}
       disabled={disabled}
       title={title}
-      className={`${base} ${styles} ${disabledStyles}`}
+      className={`${styles} ${disabledStyles}`}
     >
       {children}
     </button>

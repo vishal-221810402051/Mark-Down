@@ -67,6 +67,13 @@ function promoteCommandsLabelHtml(html: string): string {
 }
 
 type CalloutKind = "note" | "tip" | "warning" | "important";
+type ProcedureKind =
+  | "steps"
+  | "procedure"
+  | "workflow"
+  | "checklist"
+  | "validation"
+  | "run";
 
 function parseCalloutPrefix(
   text: string,
@@ -139,6 +146,107 @@ function mdastCalloutPlugin() {
         if (!parsed) return;
 
         parent.children[index] = buildCalloutNode(parsed);
+      },
+    );
+  };
+}
+
+function parseProcedureLabel(
+  text: string,
+): { kind: ProcedureKind; label: string } | null {
+  const s = text.trim();
+  const m = s.match(/^(Steps|Procedure|Workflow|Checklist|Validation|Run)\s*:\s*$/i);
+  if (!m) return null;
+  const label = m[1];
+  const kind = label.toLowerCase() as ProcedureKind;
+  return { kind, label };
+}
+
+function stringifyInlineText(children: Array<{ type?: string; value?: string; children?: unknown[] }>): string {
+  return (children ?? [])
+    .map((c) => {
+      if (!c) return "";
+      if (c.type === "text") return c.value ?? "";
+      if (c.type === "inlineCode") return "`" + (c.value ?? "") + "`";
+      if (c.type === "strong") {
+        const nested = Array.isArray(c.children)
+          ? (c.children as Array<{ value?: string }>)
+          : [];
+        return nested.map((x) => x.value ?? "").join("");
+      }
+      return "";
+    })
+    .join("");
+}
+
+function buildProcedureNode(
+  parsed: { kind: ProcedureKind; label: string },
+  items: string[],
+) {
+  return {
+    type: "paragraph",
+    children: [],
+    data: {
+      hName: "div",
+      hProperties: {
+        className: ["procedure", `procedure-${parsed.kind}`],
+      },
+      hChildren: [
+        {
+          type: "element",
+          tagName: "div",
+          properties: { className: ["procedure-title"] },
+          children: [{ type: "text", value: parsed.label }],
+        },
+        {
+          type: "element",
+          tagName: "ol",
+          properties: { className: ["procedure-list"] },
+          children: items.map((item) => ({
+            type: "element",
+            tagName: "li",
+            properties: {},
+            children: [{ type: "text", value: item }],
+          })),
+        },
+      ],
+    },
+  };
+}
+
+function mdastProcedurePlugin() {
+  return (tree: Root) => {
+    visit(
+      tree,
+      "paragraph",
+      (node: Paragraph, index: number | undefined, parent: Parent | undefined) => {
+        if (!parent || index === undefined) return;
+
+        const first =
+          node.children && node.children.length > 0 ? node.children[0] : undefined;
+        if (!first || first.type !== "text") return;
+
+        const parsed = parseProcedureLabel(first.value ?? "");
+        if (!parsed) return;
+
+        const next = (parent.children as Array<{ type?: string; ordered?: boolean; children?: unknown[] }>)[index + 1];
+        if (!next || next.type !== "list" || next.ordered !== true) return;
+
+        const items = (next.children ?? [])
+          .map((li) => {
+            const liNode = li as { children?: Array<{ type?: string; children?: unknown[] }> };
+            const p = (liNode.children ?? []).find((x) => x.type === "paragraph");
+            if (!p) return "";
+            const pNode = p as { children?: Array<{ type?: string; value?: string; children?: unknown[] }> };
+            return stringifyInlineText(pNode.children ?? []);
+          })
+          .map((s) => s.trim())
+          .filter(Boolean);
+
+        if (items.length === 0) return;
+
+        (parent.children as unknown[])[index] = buildProcedureNode(parsed, items);
+        (parent.children as unknown[]).splice(index + 1, 1);
       },
     );
   };
@@ -248,6 +356,7 @@ export async function parseMarkdownToHtml(
     .use(remarkParse)
     .use(remarkGfm)
     .use(mdastCalloutPlugin)
+    .use(mdastProcedurePlugin)
     .use(remarkRehype)
     .use(rehypeSlug)
     .use(rehypePrettyCode, prettyCodeOptions as never)

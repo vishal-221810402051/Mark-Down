@@ -33,23 +33,30 @@ function applyToSelection(
   switch (action) {
     case "inlinecode":
       return before + "`" + trimmed + "`" + suffix + after;
-    case "codeblock":
-      return before + "\n```text\n" + trimmed + "\n```\n" + suffix + after;
+    case "codeblock": {
+      const lang = guessBlockLang(trimmed);
+      return before + "\n```" + lang + "\n" + trimmed + "\n```\n" + suffix + after;
+    }
     case "blockquote": {
-      const lines = trimmed.split("\n").map((l) => (l.trim() ? `> ${l}` : ">"));
+      const lines = trimmed.split("\n").map((l) => {
+        const clean = l.replace(/^\s*>\s?/, "");
+        return clean.trim() ? `> ${clean}` : ">";
+      });
       return before + lines.join("\n") + suffix + after;
     }
     case "ul": {
-      const lines = trimmed.split("\n").map((l) => (l.trim() ? `- ${l}` : ""));
+      const lines = trimmed.split("\n").map((l) => {
+        const clean = l.replace(/^\s*(?:[-*+]\s+|\d+\.\s+)/, "").trim();
+        return clean ? `- ${clean}` : "";
+      });
       return before + lines.join("\n") + suffix + after;
     }
     case "ol": {
       let n = 1;
       const lines = trimmed.split("\n").map((l) => {
-        if (!l.trim()) return "";
-        const out = `${n}. ${l}`;
-        n += 1;
-        return out;
+        const clean = l.replace(/^\s*(?:[-*+]\s+|\d+\.\s+)/, "").trim();
+        if (!clean) return "";
+        return `${n++}. ${clean}`;
       });
       return before + lines.join("\n") + suffix + after;
     }
@@ -60,10 +67,20 @@ function applyToSelection(
       const lines = trimmed.split("\n");
       const idx = lines.findIndex((l) => l.trim().length > 0);
       if (idx === -1) return text;
-      lines[idx] = `${level} ${lines[idx].replace(/^#{1,6}\s+/, "")}`;
+      lines[idx] = `${level} ${lines[idx].replace(/^#{1,6}\s+/, "").trim()}`;
       return before + lines.join("\n") + suffix + after;
     }
   }
+}
+
+function guessBlockLang(sel: string): string {
+  const s = sel.trim();
+  if (/^(npm|pnpm|yarn|docker|git|curl|wget)\b/m.test(s)) return "bash";
+  if (/^(PS [A-Z]:\\|[A-Z]:\\.*>)/m.test(s)) return "powershell";
+  if (/\b(function|const|let|var|return|console\.log)\b/.test(s))
+    return "javascript";
+  if (/\b(def|import|from|class)\b/.test(s)) return "python";
+  return "text";
 }
 
 export default function EditPage() {
@@ -173,20 +190,40 @@ export default function EditPage() {
               Source (Output override)
             </div>
             <div className="flex flex-wrap gap-2">
-              <button className="btn" onClick={() => onAction("codeblock")}>
-                ```
+              <button
+                className="btn"
+                onClick={() => onAction("codeblock")}
+                title="Convert selection to fenced code block"
+              >
+                Code
               </button>
-              <button className="btn" onClick={() => onAction("inlinecode")}>
-                `code`
+              <button
+                className="btn"
+                onClick={() => onAction("inlinecode")}
+                title="Convert selection to inline code"
+              >
+                Inline
               </button>
-              <button className="btn" onClick={() => onAction("blockquote")}>
+              <button
+                className="btn"
+                onClick={() => onAction("blockquote")}
+                title="Convert selection to blockquote"
+              >
                 Quote
               </button>
-              <button className="btn" onClick={() => onAction("ul")}>
-                * List
+              <button
+                className="btn"
+                onClick={() => onAction("ul")}
+                title="Convert selection to bullet list"
+              >
+                Bullet
               </button>
-              <button className="btn" onClick={() => onAction("ol")}>
-                1. List
+              <button
+                className="btn"
+                onClick={() => onAction("ol")}
+                title="Convert selection to numbered list"
+              >
+                Number
               </button>
               <button className="btn" onClick={() => onAction("h2")}>
                 H2

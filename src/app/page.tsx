@@ -276,7 +276,7 @@ export default function HomePage() {
       <NotificationBar notice={notice} onClose={() => setNotice(null)} />
 
       <main className="mx-auto grid max-w-7xl grid-cols-1 gap-4 px-4 py-4 lg:grid-cols-2">
-        <div className="h-[calc(100vh-8.8rem)] overflow-hidden rounded-2xl border border-white/10 bg-white/95 shadow-[0_18px_45px_rgba(0,0,0,0.35)]">
+        <div className="doc-card h-[calc(100vh-8rem)] overflow-hidden">
           <EditorPane
             value={docState.rawText}
             onChange={setRawText}
@@ -284,12 +284,12 @@ export default function HomePage() {
           />
         </div>
 
-        <div className="h-[calc(100vh-8.8rem)] overflow-hidden rounded-2xl border border-white/10 bg-white/95 shadow-[0_18px_45px_rgba(0,0,0,0.35)]">
+        <div className="doc-card h-[calc(100vh-8rem)] overflow-hidden">
           <div className="flex h-full flex-col">
             <div className="flex items-center justify-between border-b px-3 py-2">
               <div className="text-sm font-semibold text-gray-800">Preview</div>
 
-              <label className="flex items-center gap-2 text-xs text-gray-600">
+              <label className="flex items-center gap-2 text-xs text-slate-300">
                 <input
                   type="checkbox"
                   className="h-4 w-4"
@@ -301,19 +301,19 @@ export default function HomePage() {
             </div>
 
             {showNormalized ? (
-              <div className="flex-1 overflow-auto bg-gray-50 p-3">
-                <div className="rounded-lg border bg-white p-3">
-                  <div className="mb-2 text-xs font-semibold text-gray-700">
+              <div className="flex-1 overflow-auto p-3">
+                <div className="normalized-panel rounded-xl border border-white/10 bg-slate-900/70 p-3 text-slate-200">
+                  <div className="mb-2 text-xs font-semibold text-slate-100">
                     Normalizer notes
                   </div>
-                  <ul className="mb-3 list-disc pl-5 text-xs text-gray-600">
+                  <ul className="mb-3 list-disc pl-5 text-xs text-slate-300">
                     {notes.length === 0 ? (
                       <li>None</li>
                     ) : (
                       notes.map((n, i) => <li key={i}>{n}</li>)
                     )}
                   </ul>
-                  <div className="mb-2 text-xs text-gray-600">
+                  <div className="mb-2 text-xs text-slate-300">
                     <span className="font-semibold">Stats:</span> fences=
                     {stats.fencesAutoClosed}, headings={stats.headingsFixed},
                     bullets={stats.bulletsNormalized}, numbering=
@@ -322,14 +322,14 @@ export default function HomePage() {
                     {stats.mermaidBlocksCreated}, tables=
                     {stats.tablesConverted}
                   </div>
-                  <div className="mb-2 text-xs text-gray-500">
+                  <div className="mb-2 text-xs text-slate-400">
                     Headings detected: {docState.headings.length}
                     {parseError ? ` | Parse error: ${parseError}` : ""}
                   </div>
-                  <div className="mb-2 text-xs font-semibold text-gray-700">
+                  <div className="mb-2 text-xs font-semibold text-slate-100">
                     Effective normalized text
                   </div>
-                  <pre className="whitespace-pre-wrap break-words rounded-md bg-gray-50 p-3 text-xs leading-5">
+                  <pre className="whitespace-pre-wrap break-words text-xs leading-5">
                     {docState.normalizedText}
                   </pre>
                 </div>

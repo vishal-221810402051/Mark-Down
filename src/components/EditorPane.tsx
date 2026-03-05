@@ -53,10 +53,6 @@ export default function EditorPane({ value, onChange, onLoadSample }: Props) {
           }}
         />
       </div>
-
-      <div className="border-t px-3 py-2 text-xs text-gray-500">
-        Phase 2: Monaco editor + doc pipeline scaffold.
-      </div>
     </section>
   );
 }
