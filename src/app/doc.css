@@ -174,3 +174,61 @@
 
 /* Prevent lonely headings at page bottom later */
 .doc h1, .doc h2, .doc h3, .doc h4 { break-after: avoid; page-break-after: avoid; }
+
+/* Phase 13C: Code cards (preview + PDF-safe) */
+.codecard {
+  margin: 1rem 0;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid rgba(0,0,0,0.10);
+  background: rgba(0,0,0,0.02);
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.codecard-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.45rem 0.7rem;
+  border-bottom: 1px solid rgba(0,0,0,0.08);
+  background: rgba(0,0,0,0.03);
+}
+
+.codecard-lang {
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  opacity: 0.85;
+}
+
+.codecard-copy {
+  font-size: 0.75rem;
+  padding: 0.25rem 0.55rem;
+  border-radius: 10px;
+  border: 1px solid rgba(0,0,0,0.12);
+  background: rgba(255,255,255,0.7);
+  cursor: pointer;
+}
+
+.codecard-copy:hover {
+  background: rgba(255,255,255,0.9);
+}
+
+/* Ensure pre inside codecard uses your existing pre styling */
+.codecard pre {
+  margin: 0;
+  border-radius: 0;
+}
+
+/* PDF/print: hide copy button and reduce header chrome */
+@media print {
+  .codecard-copy {
+    display: none !important;
+  }
+
+  .codecard-bar {
+    padding: 0.28rem 0.5rem;
+    background: rgba(0,0,0,0.015);
+  }
+}

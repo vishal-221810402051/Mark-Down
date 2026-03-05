@@ -226,6 +226,10 @@ function isLikelyCommand(line: string): boolean {
   );
 }
 
+function isCommandsLabel(line: string): boolean {
+  return /^\s*(Commands|Command|CLI|Terminal)\s*:\s*$/i.test(line.trim());
+}
+
 function detectCommandLang(lines: string[]): "powershell" | "bash" {
   for (const l of lines) {
     const s = l.trim();
@@ -468,11 +472,69 @@ export function normalizeInput(rawText: string): NormalizeResult {
   }
 
   // 2.5) Auto-fence unfenced multi-line code blocks.
-  const outCodeFenced: string[] = [];
-  let inFenceAuto = false;
+  // 2.25) Commands label block -> fenced code (prevents Markdown from collapsing lines)
+  const out2b: string[] = [];
+  let inFenceCmd = false;
 
   for (let i = 0; i < out2.length; i++) {
     const line = out2[i] ?? "";
+
+    if (isFenceLine(line)) {
+      inFenceCmd = !inFenceCmd;
+      out2b.push(line);
+      continue;
+    }
+
+    // Only operate outside fences
+    if (!inFenceCmd && isCommandsLabel(line)) {
+      out2b.push(line);
+
+      // Collect following non-empty lines until blank line or boundary
+      const block: string[] = [];
+      let j = i + 1;
+
+      while (j < out2.length) {
+        const nxt = out2[j] ?? "";
+        if (nxt.trim() === "") break;
+        if (isFenceLine(nxt)) break;
+        if (isSeparator(nxt) || isBlockquote(nxt)) break;
+
+        block.push(nxt);
+        j++;
+      }
+
+      // Only fence if we have at least 2 lines OR at least one looks like a command
+      const hasCmd = block.some((b) => isLikelyCommand(b));
+      if (block.length >= 2 || hasCmd) {
+        const lang = detectCommandLang(block);
+        out2b.push("```" + lang);
+
+        // Keep "# ..." lines intact inside fenced command blocks
+        for (const b of block) out2b.push(b);
+
+        out2b.push("```");
+        out2b.push("");
+        stats.commandBlocksCreated++;
+        notes.push(`Wrapped Commands: block as \`\`\`${lang}`);
+        i = j - 1;
+        continue;
+      }
+
+      // If not fenced, just output lines as-is
+      out2b.push(...block);
+      i = j - 1;
+      continue;
+    }
+
+    out2b.push(line);
+  }
+
+  // 2.5) Auto-fence unfenced multi-line code blocks.
+  const outCodeFenced: string[] = [];
+  let inFenceAuto = false;
+
+  for (let i = 0; i < out2b.length; i++) {
+    const line = out2b[i] ?? "";
 
     const openLang = isFenceOpenLine(line);
     if (openLang !== null) {
@@ -495,8 +557,8 @@ export function normalizeInput(rawText: string): NormalizeResult {
       let j = i + 1;
       let blankCount = 0;
 
-      while (j < out2.length) {
-        const nxt = out2[j] ?? "";
+      while (j < out2b.length) {
+        const nxt = out2b[j] ?? "";
 
         if (isFenceOpenLine(nxt) !== null) break;
         if (/^\s*#{1,6}\s+/.test(nxt)) break;
