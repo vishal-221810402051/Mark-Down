@@ -50,6 +50,15 @@ function decodeHtml(s: string): string {
     .replaceAll("&#39;", "'");
 }
 
+function codeHtmlToPlainText(codeHtml: string): string {
+  return decodeHtml(
+    codeHtml
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<\/span>\s*<span[^>]*>/gi, "\n")
+      .replace(/<[^>]+>/g, ""),
+  );
+}
+
 async function inlineMermaidSvgs(html: string): Promise<string> {
   const mermaidRe =
     /<pre[^>]*>\s*<code[^>]*(?:class="[^"]*(?:language-mermaid|lang-mermaid)[^"]*"|data-language="mermaid")[^>]*>([\s\S]*?)<\/code>\s*<\/pre>/g;
@@ -64,7 +73,7 @@ async function inlineMermaidSvgs(html: string): Promise<string> {
 
   let out = html;
   for (const item of matches) {
-    const codeText = decodeHtml(item.codeHtml);
+    const codeText = codeHtmlToPlainText(item.codeHtml);
     const svg = await renderMermaidToSvg(codeText);
     const wrapped = `<div class="mermaid-svg">${svg}</div>`;
     out = out.replace(item.full, wrapped);
