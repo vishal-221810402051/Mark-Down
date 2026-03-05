@@ -232,3 +232,50 @@
     background: rgba(0,0,0,0.015);
   }
 }
+
+.doc .mini-heading {
+  margin: 1.2rem 0 0.5rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  color: rgba(17, 24, 39, 0.75);
+}
+
+/* Phase 13D: Print polish (avoid orphans, keep blocks together) */
+.doc h1, .doc h2, .doc h3, .doc h4 {
+  break-after: avoid;
+  page-break-after: avoid;
+}
+
+.doc h2 + p, .doc h3 + p, .doc h4 + p,
+.doc h2 + pre, .doc h3 + pre, .doc h4 + pre,
+.doc h2 + table, .doc h3 + table, .doc h4 + table,
+.doc h2 + .callout, .doc h3 + .callout, .doc h4 + .callout,
+.doc h2 + .procedure, .doc h3 + .procedure, .doc h4 + .procedure,
+.doc h2 + .codecard, .doc h3 + .codecard, .doc h4 + .codecard {
+  break-before: avoid;
+  page-break-before: avoid;
+}
+
+.doc pre, .doc table, .callout, .procedure, .codecard {
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+/* Phase 13D: spacing rhythm */
+.doc .toc { margin: 0 0 1.5rem; }
+.callout, .procedure, .codecard { margin: 1.1rem 0; }
+.doc hr { margin: 1.5rem 0; }
+
+/* Phase 13D: Table width presets (primarily for 3-column tables) */
+.doc.table-equal table { table-layout: fixed; width: 100%; }
+.doc.table-wide-first table { table-layout: fixed; width: 100%; }
+.doc.table-wide-middle table { table-layout: fixed; width: 100%; }
+
+.doc.table-wide-first th:nth-child(1), .doc.table-wide-first td:nth-child(1) { width: 40%; }
+.doc.table-wide-first th:nth-child(n+2), .doc.table-wide-first td:nth-child(n+2) { width: 30%; }
+
+.doc.table-wide-middle th:nth-child(2), .doc.table-wide-middle td:nth-child(2) { width: 46%; }
+.doc.table-wide-middle th:nth-child(1), .doc.table-wide-middle td:nth-child(1) { width: 27%; }
+.doc.table-wide-middle th:nth-child(3), .doc.table-wide-middle td:nth-child(3) { width: 27%; }

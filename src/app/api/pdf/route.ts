@@ -16,6 +16,7 @@ type PdfReq = {
   includeToc?: boolean;
   tocDepth?: 2 | 3 | 4;
   marginPreset?: "compact" | "normal" | "spacious";
+  tablePreset?: "equal" | "wide-first" | "wide-middle";
 };
 
 function marginsForPreset(p: "compact" | "normal" | "spacious") {
@@ -75,6 +76,7 @@ async function inlineMermaidSvgs(html: string): Promise<string> {
 function buildFullHtml(opts: {
   title: string;
   theme: "whitepaper" | "dev" | "academic";
+  tablePreset: "equal" | "wide-first" | "wide-middle";
   bodyHtml: string;
   margins: { top: string; right: string; bottom: string; left: string };
 }): string {
@@ -103,7 +105,7 @@ function buildFullHtml(opts: {
     <style>${printCss}</style>
   </head>
   <body>
-    <main class="doc theme-${opts.theme}">
+    <main class="doc theme-${opts.theme} table-${opts.tablePreset}">
       ${opts.bodyHtml}
     </main>
   </body>
@@ -123,6 +125,7 @@ export async function POST(req: Request) {
   const includeToc = body.includeToc ?? true;
   const tocDepth = (body.tocDepth ?? 3) as 2 | 3 | 4;
   const marginPreset = body.marginPreset ?? "normal";
+  const tablePreset = body.tablePreset ?? "equal";
   const margins = marginsForPreset(marginPreset);
   const title = (body.title ?? "Mark-Down Document").toString();
 
@@ -138,6 +141,7 @@ export async function POST(req: Request) {
     const fullHtml = buildFullHtml({
       title,
       theme,
+      tablePreset,
       bodyHtml: htmlWithDiagrams,
       margins,
     });

@@ -59,6 +59,13 @@ function escapeHtml(s: string): string {
     .replaceAll(">", "&gt;");
 }
 
+function promoteCommandsLabelHtml(html: string): string {
+  return html.replace(
+    /<p>\s*(Commands|Command|CLI|Terminal)\s*:\s*<\/p>/gi,
+    (_m, label) => `<p class="mini-heading">${escapeHtml(label)}</p>`,
+  );
+}
+
 type CalloutKind = "note" | "tip" | "warning" | "important";
 
 function parseCalloutPrefix(
@@ -250,6 +257,7 @@ export async function parseMarkdownToHtml(
 
   let html = String(file);
   html = applyHeadingIds(html, headings);
+  html = promoteCommandsLabelHtml(html);
 
   const includeToc = opts?.includeToc ?? true;
   const tocMaxDepth = opts?.tocMaxDepth ?? 3;

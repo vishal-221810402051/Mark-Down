@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 
 export type MarginPreset = "compact" | "normal" | "spacious";
 export type Theme = "whitepaper" | "dev" | "academic";
+export type TablePreset = "equal" | "wide-first" | "wide-middle";
 
 type Props = {
   open: boolean;
@@ -23,6 +24,9 @@ type Props = {
 
   marginPreset: MarginPreset;
   setMarginPreset: (v: MarginPreset) => void;
+
+  tablePreset: TablePreset;
+  setTablePreset: (v: TablePreset) => void;
 };
 
 function GlassCard({ children }: { children: ReactNode }) {
@@ -47,6 +51,8 @@ export default function SettingsPanel(props: Props) {
     setTocDepth,
     marginPreset,
     setMarginPreset,
+    tablePreset,
+    setTablePreset,
   } = props;
 
   return (
@@ -183,6 +189,24 @@ export default function SettingsPanel(props: Props) {
               <p className="mt-2 text-xs text-white/50">
                 Compact fits more content. Spacious improves readability.
               </p>
+            </GlassCard>
+
+            <GlassCard>
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-xs font-semibold text-white/80">Table layout</div>
+                  <div className="text-xs text-white/50">PDF column width preset</div>
+                </div>
+                <select
+                  value={tablePreset}
+                  onChange={(e) => setTablePreset(e.target.value as TablePreset)}
+                  className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none focus:ring-2 focus:ring-white/10"
+                >
+                  <option value="equal">Equal</option>
+                  <option value="wide-first">Wide first column</option>
+                  <option value="wide-middle">Wide middle column</option>
+                </select>
+              </div>
             </GlassCard>
 
             <div className="rounded-2xl border border-white/10 bg-white/5 p-4 backdrop-blur-xl">

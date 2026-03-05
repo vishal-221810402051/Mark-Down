@@ -6,6 +6,7 @@ import NotificationBar, { type Notice } from "@/components/NotificationBar";
 import PreviewPane from "@/components/PreviewPane";
 import SettingsPanel, {
   type MarginPreset,
+  type TablePreset,
   type Theme,
 } from "@/components/SettingsPanel";
 import SuggestionsPanel from "@/components/SuggestionsPanel";
@@ -28,6 +29,7 @@ export default function HomePage() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [docTitle, setDocTitle] = useState("Mark-Down Document");
   const [marginPreset, setMarginPreset] = useState<MarginPreset>("normal");
+  const [tablePreset, setTablePreset] = useState<TablePreset>("equal");
 
   const [optimizerOpen, setOptimizerOpen] = useState(false);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
@@ -185,6 +187,7 @@ export default function HomePage() {
           includeToc,
           tocDepth,
           marginPreset,
+          tablePreset,
         }),
       });
 
@@ -318,6 +321,8 @@ export default function HomePage() {
         setTocDepth={setTocDepth}
         marginPreset={marginPreset}
         setMarginPreset={setMarginPreset}
+        tablePreset={tablePreset}
+        setTablePreset={setTablePreset}
       />
 
       <SuggestionsPanel
