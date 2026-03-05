@@ -44,6 +44,32 @@
   border-radius: 0.5rem;
 }
 
+.callout {
+  margin: 1rem 0;
+  padding: 0.9rem 1rem;
+  border-radius: 14px;
+  border: 1px solid rgba(0,0,0,0.10);
+  background: rgba(0,0,0,0.02);
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.callout-title {
+  font-weight: 750;
+  font-size: 0.85rem;
+  letter-spacing: 0.02em;
+  margin-bottom: 0.35rem;
+}
+
+.callout-body {
+  font-size: 0.95em;
+}
+
+.callout-note { border-color: rgba(59,130,246,0.25); background: rgba(59,130,246,0.06); }
+.callout-tip { border-color: rgba(16,185,129,0.25); background: rgba(16,185,129,0.06); }
+.callout-warning { border-color: rgba(245,158,11,0.30); background: rgba(245,158,11,0.08); }
+.callout-important { border-color: rgba(239,68,68,0.28); background: rgba(239,68,68,0.07); }
+
 .doc pre {
   margin: 1rem 0;
   padding: 0.85rem 1rem;

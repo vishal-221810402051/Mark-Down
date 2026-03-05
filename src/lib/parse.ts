@@ -7,6 +7,8 @@ import remarkParse from "remark-parse";
 import remarkRehype from "remark-rehype";
 import { remark } from "remark";
 import { visit } from "unist-util-visit";
+import type { Blockquote, Paragraph, Root } from "mdast";
+import type { Parent } from "unist";
 
 import type { DocHeading, ParseResult } from "./docModel";
 
@@ -57,6 +59,84 @@ function escapeHtml(s: string): string {
     .replaceAll(">", "&gt;");
 }
 
+type CalloutKind = "note" | "tip" | "warning" | "important";
+
+function parseCalloutPrefix(
+  text: string,
+): { kind: CalloutKind; rest: string } | null {
+  const m = text.match(/^\s*(Note|Tip|Warning|Important)\s*:\s*(.+)\s*$/i);
+  if (!m) return null;
+  const kind = m[1].toLowerCase() as CalloutKind;
+  return { kind, rest: m[2] };
+}
+
+function buildCalloutNode(parsed: { kind: CalloutKind; rest: string }) {
+  return {
+    type: "paragraph",
+    children: [],
+    data: {
+      hName: "div",
+      hProperties: {
+        className: ["callout", `callout-${parsed.kind}`],
+      },
+      hChildren: [
+        {
+          type: "element",
+          tagName: "div",
+          properties: { className: ["callout-title"] },
+          children: [{ type: "text", value: parsed.kind.toUpperCase() }],
+        },
+        {
+          type: "element",
+          tagName: "div",
+          properties: { className: ["callout-body"] },
+          children: [{ type: "text", value: parsed.rest }],
+        },
+      ],
+    },
+  };
+}
+
+function mdastCalloutPlugin() {
+  return (tree: Root) => {
+    visit(
+      tree,
+      "paragraph",
+      (node: Paragraph, index: number | undefined, parent: Parent | undefined) => {
+        if (!parent || index === undefined) return;
+      if (parent.type === "blockquote") return;
+      const first =
+        node.children && node.children.length > 0 ? node.children[0] : undefined;
+      if (!first || first.type !== "text") return;
+
+      const parsed = parseCalloutPrefix(first.value ?? "");
+      if (!parsed) return;
+
+      parent.children[index] = buildCalloutNode(parsed);
+      },
+    );
+
+    visit(
+      tree,
+      "blockquote",
+      (node: Blockquote, index: number | undefined, parent: Parent | undefined) => {
+        const p =
+          node.children && node.children.length > 0 ? node.children[0] : undefined;
+        if (!parent || index === undefined) return;
+        if (!p || p.type !== "paragraph") return;
+        const first =
+          p.children && p.children.length > 0 ? p.children[0] : undefined;
+        if (!first || first.type !== "text") return;
+
+        const parsed = parseCalloutPrefix(first.value ?? "");
+        if (!parsed) return;
+
+        parent.children[index] = buildCalloutNode(parsed);
+      },
+    );
+  };
+}
+
 function buildTocHtml(headings: DocHeading[], maxDepth: number): string {
   const filtered = headings.filter((h) => h.depth <= maxDepth);
   if (filtered.length === 0) return "";
@@ -86,6 +166,57 @@ const prettyCodeOptions = {
   defaultLang: "text",
 };
 
+const sanitizeSchema = {
+  ...defaultSchema,
+  tagNames: [
+    ...(defaultSchema.tagNames ?? []),
+    "div",
+    "p",
+    "hr",
+    "blockquote",
+    "table",
+    "thead",
+    "tbody",
+    "tr",
+    "th",
+    "td",
+    "pre",
+    "code",
+    "span",
+    "a",
+  ],
+  attributes: {
+    ...defaultSchema.attributes,
+    div: [...(defaultSchema.attributes?.div || []), ["className"]],
+    p: [...(defaultSchema.attributes?.p || []), ["className"]],
+    a: [
+      ...(defaultSchema.attributes?.a || []),
+      ["href"],
+      ["target"],
+      ["rel"],
+    ],
+    pre: [
+      ...(defaultSchema.attributes?.pre || []),
+      ["className"],
+      ["data-language"],
+      ["data-theme"],
+    ],
+    code: [
+      ...(defaultSchema.attributes?.code || []),
+      ["className"],
+      ["data-language"],
+      ["data-theme"],
+    ],
+    span: [
+      ...(defaultSchema.attributes?.span || []),
+      ["className"],
+      ["style"],
+    ],
+    th: [...(defaultSchema.attributes?.th || []), ["colspan"], ["rowspan"]],
+    td: [...(defaultSchema.attributes?.td || []), ["colspan"], ["rowspan"]],
+  },
+};
+
 export async function parseMarkdownToHtml(
   markdown: string,
   opts?: { includeToc?: boolean; tocMaxDepth?: number },
@@ -106,53 +237,14 @@ export async function parseMarkdownToHtml(
     headings.push({ depth, text, id });
   });
 
-  const schema = {
-    ...defaultSchema,
-    attributes: {
-      ...defaultSchema.attributes,
-      // Allow attrs used by rehype-pretty-code token output.
-      code: [
-        ...(defaultSchema.attributes?.code || []),
-        ["className"],
-        ["data-language"],
-        ["data-theme"],
-        ["style"],
-      ],
-      pre: [
-        ...(defaultSchema.attributes?.pre || []),
-        ["className"],
-        ["data-language"],
-        ["data-theme"],
-        ["style"],
-      ],
-      span: [
-        ...(defaultSchema.attributes?.span || []),
-        ["className"],
-        ["style"],
-        ["data-line"],
-        ["data-highlighted-line"],
-        ["data-highlighted-chars"],
-      ],
-      figure: [
-        ...(defaultSchema.attributes?.figure || []),
-        ["className"],
-        ["data-rehype-pretty-code-figure"],
-      ],
-      div: [
-        ...(defaultSchema.attributes?.div || []),
-        ["className"],
-        ["data-rehype-pretty-code-fragment"],
-      ],
-    },
-  };
-
   const file = await remark()
     .use(remarkParse)
     .use(remarkGfm)
+    .use(mdastCalloutPlugin)
     .use(remarkRehype)
     .use(rehypeSlug)
     .use(rehypePrettyCode, prettyCodeOptions as never)
-    .use(rehypeSanitize, schema as never)
+    .use(rehypeSanitize, sanitizeSchema as never)
     .use(rehypeStringify)
     .process(markdown);
 
