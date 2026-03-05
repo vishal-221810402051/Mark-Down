@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import EditorPane from "@/components/EditorPane";
 import NotificationBar, { type Notice } from "@/components/NotificationBar";
 import PreviewPane from "@/components/PreviewPane";
@@ -14,11 +15,13 @@ import TopBar from "@/components/TopBar";
 import type { DocHeading, DocState } from "@/lib/docModel";
 import { normalizeInput } from "@/lib/normalize";
 import { parseMarkdownToHtml } from "@/lib/parse";
+import { clearSession, loadSession, saveSession } from "@/lib/sessionStore";
 import { SAMPLES } from "@/lib/samples";
 import { generateSuggestions } from "@/lib/suggestions/engine";
 import type { Suggestion } from "@/lib/suggestions/types";
 
 export default function HomePage() {
+  const router = useRouter();
   const [rawText, setRawText] = useState<string>("");
   const [showNormalized, setShowNormalized] = useState<boolean>(false);
 
@@ -55,6 +58,21 @@ export default function HomePage() {
   );
 
   const effectiveNormalized = normalizedOverride ?? normalizedText;
+
+  useEffect(() => {
+    const s = loadSession();
+    if (!s) return;
+
+    setRawText(s.rawText ?? "");
+    setNormalizedOverride(s.normalizedOverride ?? null);
+    setTheme(s.theme ?? "whitepaper");
+    setIncludeToc(!!s.includeToc);
+    setTocDepth((s.tocDepth ?? 3) as 2 | 3 | 4);
+    setDocTitle(s.docTitle ?? "Mark-Down Document");
+    setMarginPreset((s.marginPreset ?? "normal") as MarginPreset);
+    setTablePreset((s.tablePreset ?? "equal") as TablePreset);
+    clearSession();
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -227,11 +245,26 @@ export default function HomePage() {
     a.click();
   }
 
+  function handleEditPreview() {
+    saveSession({
+      rawText,
+      normalizedOverride,
+      theme,
+      includeToc,
+      tocDepth,
+      docTitle,
+      marginPreset,
+      tablePreset,
+    });
+    router.push("/edit");
+  }
+
   return (
     <div className="min-h-screen text-white">
       <TopBar
         onGeneratePdf={handleGeneratePdf}
         onDownloadPdf={handleDownloadPdf}
+        onEditPreview={handleEditPreview}
         onToggleSettings={() => setSettingsOpen(true)}
         onToggleOptimizer={() => setOptimizerOpen(true)}
         isGenerating={isGenerating}

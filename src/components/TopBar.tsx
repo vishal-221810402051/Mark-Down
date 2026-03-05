@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 type Props = {
   onGeneratePdf: () => void;
   onDownloadPdf: () => void;
+  onEditPreview: () => void;
   onToggleSettings: () => void;
   onToggleOptimizer: () => void;
   isGenerating: boolean;
@@ -47,6 +48,7 @@ function GlassButton(props: {
 export default function TopBar({
   onGeneratePdf,
   onDownloadPdf,
+  onEditPreview,
   onToggleSettings,
   onToggleOptimizer,
   isGenerating,
@@ -88,6 +90,10 @@ export default function TopBar({
             title={hasPdf ? "Download the latest PDF" : "Generate a PDF first"}
           >
             Download
+          </GlassButton>
+
+          <GlassButton onClick={onEditPreview} title="Open preview edit mode">
+            Edit Preview
           </GlassButton>
 
           <GlassButton onClick={onToggleSettings} title="Export settings">

@@ -495,8 +495,23 @@ export function normalizeInput(rawText: string): NormalizeResult {
 
       while (j < out2.length) {
         const nxt = out2[j] ?? "";
-        if (nxt.trim() === "") break;
+
+        // Allow blank lines inside command blocks.
+        if (nxt.trim() === "") {
+          block.push("");
+          j++;
+          continue;
+        }
+
+        // Treat "# ..." as shell comments inside an already-detected command region.
+        if (/^\s*#\s+/.test(nxt) && block.some((b) => isLikelyCommand(b))) {
+          block.push(nxt);
+          j++;
+          continue;
+        }
+
         if (isFenceLine(nxt)) break;
+        if (isMarkdownHeading(nxt) || isNumberHeading(nxt)) break;
         if (isSeparator(nxt) || isBlockquote(nxt)) break;
 
         block.push(nxt);
@@ -536,18 +551,29 @@ export function normalizeInput(rawText: string): NormalizeResult {
   for (let i = 0; i < out2b.length; i++) {
     const line = out2b[i] ?? "";
 
+    // Never run auto-fence logic on fence markers.
     const openLang = isFenceOpenLine(line);
-    if (openLang !== null) {
-      inFenceAuto = true;
+    if (openLang !== null || isFenceCloseLine(line)) {
+      if (openLang !== null) inFenceAuto = true;
+      if (isFenceCloseLine(line)) inFenceAuto = false;
       outCodeFenced.push(line);
       continue;
     }
-    if (inFenceAuto && isFenceCloseLine(line)) {
-      inFenceAuto = false;
-      outCodeFenced.push(line);
-      continue;
-    }
+
     if (inFenceAuto) {
+      outCodeFenced.push(line);
+      continue;
+    }
+
+    // Never start auto-fence on structural markdown.
+    if (
+      isMarkdownHeading(line) ||
+      isNumberHeading(line) ||
+      isBlockquote(line) ||
+      isSeparator(line) ||
+      isListLine(line) ||
+      isCommandsLabel(line)
+    ) {
       outCodeFenced.push(line);
       continue;
     }
