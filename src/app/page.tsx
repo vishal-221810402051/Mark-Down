@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import DocumentMap from "@/components/DocumentMap";
 import EditorPane from "@/components/EditorPane";
 import NotificationBar, { type Notice } from "@/components/NotificationBar";
 import PreviewPane from "@/components/PreviewPane";
@@ -19,6 +20,7 @@ import { clearSession, loadSession, saveSession } from "@/lib/sessionStore";
 import { SAMPLES } from "@/lib/samples";
 import { generateSuggestions } from "@/lib/suggestions/engine";
 import type { Suggestion } from "@/lib/suggestions/types";
+import type { DocIntelligence } from "@/lib/docIntelligence";
 
 export default function HomePage() {
   const router = useRouter();
@@ -43,7 +45,11 @@ export default function HomePage() {
 
   const [renderedHtml, setRenderedHtml] = useState<string>("");
   const [headings, setHeadings] = useState<DocHeading[]>([]);
+  const [intelligence, setIntelligence] = useState<DocIntelligence | null>(null);
   const [parseError, setParseError] = useState<string | null>(null);
+  const [activeHeadingId, setActiveHeadingId] = useState<string | null>(null);
+  const [showDocMap, setShowDocMap] = useState<boolean>(true);
+  const previewScrollRef = useRef<HTMLDivElement | null>(null);
 
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
@@ -87,6 +93,7 @@ export default function HomePage() {
         if (!cancelled) {
           setRenderedHtml(res.html);
           setHeadings(res.headings);
+          setIntelligence(res.intelligence);
         }
       } catch (e: unknown) {
         if (!cancelled) {
@@ -94,6 +101,7 @@ export default function HomePage() {
           setParseError(message);
           setRenderedHtml("");
           setHeadings([]);
+          setIntelligence(null);
         }
       }
     })();
@@ -112,6 +120,45 @@ export default function HomePage() {
       if (pdfUrl) URL.revokeObjectURL(pdfUrl);
     };
   }, [pdfUrl]);
+
+  const resolveHeadingEls = useCallback(
+    (scroller: HTMLDivElement): HTMLElement[] => {
+      return headings
+        .map((h) => scroller.querySelector<HTMLElement>(`#${CSS.escape(h.id)}`))
+        .filter((el): el is HTMLElement => !!el);
+    },
+    [headings],
+  );
+
+  useEffect(() => {
+    const scroller = previewScrollRef.current;
+    if (!scroller || headings.length === 0 || showNormalized) {
+      setActiveHeadingId(null);
+      return;
+    }
+    const activeScroller: HTMLDivElement = scroller;
+
+    function onScroll() {
+      const headingEls = resolveHeadingEls(activeScroller);
+      if (headingEls.length === 0) {
+        setActiveHeadingId(null);
+        return;
+      }
+
+      let current: string | null = null;
+      for (const el of headingEls) {
+        if (el.offsetTop - activeScroller.scrollTop <= 80) {
+          current = el.id;
+        }
+      }
+
+      setActiveHeadingId(current ?? headingEls[0]?.id ?? null);
+    }
+
+    onScroll();
+    activeScroller.addEventListener("scroll", onScroll, { passive: true });
+    return () => activeScroller.removeEventListener("scroll", onScroll);
+  }, [headings, renderedHtml, resolveHeadingEls, showNormalized]);
 
   const docState: DocState = useMemo(
     () => ({
@@ -267,15 +314,17 @@ export default function HomePage() {
         onEditPreview={handleEditPreview}
         onToggleSettings={() => setSettingsOpen(true)}
         onToggleOptimizer={() => setOptimizerOpen(true)}
+        onToggleDocMap={() => setShowDocMap((v) => !v)}
         isGenerating={isGenerating}
         hasPdf={!!pdfUrl}
         suggestionCount={suggestions.length}
         statusText={statusText}
+        showDocMap={showDocMap}
       />
 
       <NotificationBar notice={notice} onClose={() => setNotice(null)} />
 
-      <main className="mx-auto grid max-w-7xl grid-cols-1 gap-4 px-4 py-4 lg:grid-cols-2">
+      <main className="mx-auto grid max-w-[1840px] grid-cols-1 gap-6 px-6 py-6 xl:grid-cols-[1.05fr_1.05fr_360px]">
         <div className="doc-card h-[calc(100vh-8rem)] overflow-hidden">
           <EditorPane
             value={docState.rawText}
@@ -300,6 +349,21 @@ export default function HomePage() {
               </label>
             </div>
 
+            {!showNormalized && intelligence ? (
+              <div className="mx-3 mt-2 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-xs text-slate-200">
+                <div className="font-semibold text-white/90">Document Intelligence</div>
+                <div className="mt-1">
+                  Headings: {intelligence.stats.headings} · Code:{" "}
+                  {intelligence.stats.codeBlocks} · Commands:{" "}
+                  {intelligence.stats.commandBlocks} · Tables:{" "}
+                  {intelligence.stats.tables} · Diagrams:{" "}
+                  {intelligence.stats.diagrams} · Procedures:{" "}
+                  {intelligence.stats.procedures} · Callouts:{" "}
+                  {intelligence.stats.callouts}
+                </div>
+              </div>
+            ) : null}
+
             {showNormalized ? (
               <div className="flex-1 overflow-auto p-3">
                 <div className="normalized-panel rounded-xl border border-white/10 bg-slate-900/70 p-3 text-slate-200">
@@ -323,7 +387,7 @@ export default function HomePage() {
                     {stats.tablesConverted}
                   </div>
                   <div className="mb-2 text-xs text-slate-400">
-                    Headings detected: {docState.headings.length}
+                    Headings detected: {intelligence?.stats.headings ?? docState.headings.length}
                     {parseError ? ` | Parse error: ${parseError}` : ""}
                   </div>
                   <div className="mb-2 text-xs font-semibold text-slate-100">
@@ -335,10 +399,24 @@ export default function HomePage() {
                 </div>
               </div>
             ) : (
-              <PreviewPane renderedHtml={docState.renderedPreview} theme={theme} />
+              <PreviewPane
+                renderedHtml={docState.renderedPreview}
+                theme={theme}
+                previewScrollRef={previewScrollRef}
+              />
             )}
           </div>
         </div>
+
+        {showDocMap ? (
+          <div className="h-[calc(100vh-8.25rem)] overflow-hidden">
+            <DocumentMap
+              intelligence={intelligence}
+              previewScrollRef={previewScrollRef}
+              activeHeadingId={activeHeadingId}
+            />
+          </div>
+        ) : null}
       </main>
 
       <SettingsPanel

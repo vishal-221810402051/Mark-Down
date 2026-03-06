@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import type { RefObject } from "react";
 
 export type PreviewTheme = "whitepaper" | "dev" | "academic";
 
@@ -8,6 +9,7 @@ type Props = {
   title?: string;
   renderedHtml: string; // sanitized HTML
   theme: PreviewTheme;
+  previewScrollRef?: RefObject<HTMLDivElement | null>;
 };
 
 function isMermaidCodeBlock(codeEl: Element): boolean {
@@ -60,10 +62,40 @@ function getPreText(pre: HTMLElement): string {
   return pre.innerText ?? "";
 }
 
+function assignPreviewAnchors(root: HTMLElement): void {
+  const tables = Array.from(root.querySelectorAll("table"));
+  tables.forEach((table, i) => {
+    table.id = `table-${i + 1}`;
+  });
+
+  const procedures = Array.from(root.querySelectorAll(".procedure"));
+  procedures.forEach((el, i) => {
+    (el as HTMLElement).id = `procedure-${i + 1}`;
+  });
+
+  const callouts = Array.from(root.querySelectorAll(".callout"));
+  callouts.forEach((el, i) => {
+    (el as HTMLElement).id = `callout-${i + 1}`;
+  });
+
+  const codecards = Array.from(root.querySelectorAll(".codecard"));
+  codecards.forEach((el, i) => {
+    (el as HTMLElement).id = `codeblock-${i + 1}`;
+  });
+
+  const diagrams = Array.from(
+    root.querySelectorAll(".mermaid-diagram, .ascii-diagram, .mermaid-error"),
+  );
+  diagrams.forEach((el, i) => {
+    (el as HTMLElement).id = `diagram-${i + 1}`;
+  });
+}
+
 export default function PreviewPane({
   title = "Preview",
   renderedHtml,
   theme,
+  previewScrollRef,
 }: Props) {
   const ref = useRef<HTMLDivElement | null>(null);
 
@@ -94,7 +126,7 @@ export default function PreviewPane({
 
         const placeholder = document.createElement("div");
         placeholder.className =
-          "my-3 rounded-lg border bg-white p-3 text-xs text-gray-500";
+          "mermaid-pending my-3 rounded-lg border bg-white p-3 text-xs text-gray-500";
         placeholder.textContent = "Rendering diagram...";
         pre.replaceWith(placeholder);
 
@@ -112,12 +144,17 @@ export default function PreviewPane({
           }
 
           const wrap = document.createElement("div");
-          wrap.className = "my-4 overflow-auto rounded-lg border bg-white p-3";
+          wrap.className =
+            "mermaid-diagram my-4 overflow-auto rounded-lg border bg-white p-3";
           wrap.innerHTML = data.svg;
           placeholder.replaceWith(wrap);
+          assignPreviewAnchors(root);
         } catch (e: unknown) {
           const message = e instanceof Error ? e.message : "unknown error";
+          placeholder.className =
+            "mermaid-error my-3 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700";
           placeholder.textContent = `Diagram render failed: ${message}`;
+          assignPreviewAnchors(root);
         }
       });
     }
@@ -168,6 +205,8 @@ export default function PreviewPane({
       wrapper.appendChild(bar);
       wrapper.appendChild(pre);
     });
+
+    assignPreviewAnchors(root);
   }, [renderedHtml]);
 
   return (
@@ -177,7 +216,7 @@ export default function PreviewPane({
         <div className="text-xs text-gray-500">Paper view</div>
       </div>
 
-      <div className="flex-1 overflow-auto bg-gray-50 p-4">
+      <div ref={previewScrollRef} className="flex-1 overflow-auto bg-gray-50 p-4">
         <div className="mx-auto w-full max-w-[820px] rounded-lg bg-white shadow-sm ring-1 ring-black/5">
           <div className="px-10 py-12">
             {renderedHtml.trim().length === 0 ? (
