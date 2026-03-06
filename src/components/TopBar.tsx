@@ -6,10 +6,12 @@ type Props = {
   onEditPreview: () => void;
   onToggleSettings: () => void;
   onToggleOptimizer: () => void;
+  onToggleDocMap?: () => void;
   isGenerating: boolean;
   hasPdf: boolean;
   suggestionCount: number;
   statusText?: string | null;
+  showDocMap?: boolean;
 };
 
 function GlassButton(props: {
@@ -42,10 +44,12 @@ export default function TopBar({
   onEditPreview,
   onToggleSettings,
   onToggleOptimizer,
+  onToggleDocMap,
   isGenerating,
   hasPdf,
   suggestionCount,
   statusText,
+  showDocMap,
 }: Props) {
   return (
     <header className="sticky top-0 z-10 border-b border-white/10 bg-gradient-to-r from-slate-950/80 to-slate-900/80 backdrop-blur-2xl">
@@ -86,6 +90,12 @@ export default function TopBar({
           <GlassButton onClick={onEditPreview} title="Open preview edit mode">
             Edit Preview
           </GlassButton>
+
+          {onToggleDocMap ? (
+            <GlassButton onClick={onToggleDocMap} title="Toggle Document Map">
+              {showDocMap ? "Hide Map" : "Show Map"}
+            </GlassButton>
+          ) : null}
 
           <GlassButton onClick={onToggleSettings} title="Export settings">
             Settings
