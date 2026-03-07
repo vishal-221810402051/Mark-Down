@@ -3,10 +3,12 @@
 import { useMemo, useState } from "react";
 import type { ReactNode, RefObject } from "react";
 
+import type { DocDiagnostics } from "@/lib/docDiagnostics";
 import type { DocIntelligence } from "@/lib/docIntelligence";
 
 type Props = {
   intelligence: DocIntelligence | null;
+  diagnostics?: DocDiagnostics | null;
   previewScrollRef: RefObject<HTMLDivElement | null>;
   activeHeadingId?: string | null;
 };
@@ -79,6 +81,7 @@ function scrollToTarget(
 
 export default function DocumentMap({
   intelligence,
+  diagnostics,
   previewScrollRef,
   activeHeadingId,
 }: Props) {
@@ -97,10 +100,39 @@ export default function DocumentMap({
     <aside className="h-full overflow-auto rounded-2xl border border-white/10 bg-black/25 p-3 backdrop-blur-2xl shadow-[0_18px_45px_rgba(0,0,0,0.35)]">
       <div className="mb-3">
         <div className="text-sm font-bold text-white/95">Document Map</div>
-        {intelligence?.summary?.short ? (
-          <div className="mt-1 text-xs leading-5 text-white/55">{intelligence.summary.short}</div>
+        {intelligence ? (
+          <div className="mt-1 text-xs leading-5 text-white/55">
+            {intelligence.stats.headings} headings · {intelligence.stats.commandBlocks} commands
+            · {intelligence.stats.tables} tables · {intelligence.stats.diagrams} diagrams ·{" "}
+            {intelligence.stats.procedures} procedures
+          </div>
         ) : null}
       </div>
+
+      {diagnostics && diagnostics.items.length > 0 ? (
+        <div className="mb-3 rounded-2xl border border-white/10 bg-white/5 px-3 py-3">
+          <div className="text-xs font-semibold uppercase tracking-wide text-white/70">
+            Diagnostics
+          </div>
+          <div className="mt-1 text-xs text-white/55">
+            {diagnostics.summary.error} errors · {diagnostics.summary.warning} warnings ·{" "}
+            {diagnostics.summary.info} info
+          </div>
+          <div className="mt-3 space-y-2">
+            {diagnostics.items.slice(0, 5).map((item, i) => (
+              <div
+                key={`${item.kind}-${i}`}
+                className="rounded-xl border border-white/8 bg-black/20 px-3 py-2"
+              >
+                <div className="text-xs font-medium text-white/85">{item.message}</div>
+                {item.detail ? (
+                  <div className="mt-0.5 text-[11px] leading-4 text-white/45">{item.detail}</div>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       <div className="space-y-3">
         <Group title="Sections" count={sections.length}>

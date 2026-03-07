@@ -14,6 +14,7 @@ import SettingsPanel, {
 import SuggestionsPanel from "@/components/SuggestionsPanel";
 import TopBar from "@/components/TopBar";
 import type { DocHeading, DocState } from "@/lib/docModel";
+import { extractDocDiagnostics, type DocDiagnostics } from "@/lib/docDiagnostics";
 import { normalizeInput } from "@/lib/normalize";
 import { parseMarkdownToHtml } from "@/lib/parse";
 import { clearSession, loadSession, saveSession } from "@/lib/sessionStore";
@@ -115,6 +116,20 @@ export default function HomePage() {
   useEffect(() => {
     setSuggestions(generateSuggestions(rawText, normalizedText));
   }, [rawText, normalizedText]);
+
+  const diagnostics: DocDiagnostics = useMemo(
+    () =>
+      extractDocDiagnostics({
+        rawText,
+        normalizedText: effectiveNormalized,
+        notes,
+        stats,
+        renderedHtml,
+        headings,
+        intelligence,
+      }),
+    [rawText, effectiveNormalized, notes, stats, renderedHtml, headings, intelligence],
+  );
 
   useEffect(() => {
     return () => {
@@ -350,7 +365,7 @@ export default function HomePage() {
               </label>
             </div>
 
-            {!showNormalized && intelligence ? (
+            {!showNormalized && intelligence && !showDocMap ? (
               <div className="mx-3 mt-2 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-xs text-slate-200">
                 <div className="font-semibold text-white/90">Document Intelligence</div>
                 <div className="mt-1">
@@ -413,6 +428,7 @@ export default function HomePage() {
           <div className="h-[calc(100vh-8.25rem)] overflow-hidden">
             <DocumentMap
               intelligence={intelligence}
+              diagnostics={diagnostics}
               previewScrollRef={previewScrollRef}
               activeHeadingId={activeHeadingId}
             />
