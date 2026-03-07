@@ -1,0 +1,329 @@
+HELIXA PRO V1 — Roadmap + Electronics BOM (with Notes/Warnings) + Flowcharts + Estimates
+
+(Based on the locked V1 spec and architecture in the master document.) 
+
+helixia pro
+
+1) Project Goal (V1)
+
+HELIXA PRO is an offline, deterministic, instrument-grade genetic reasoning device that runs the full workflow:
+
+Trait → Candidate genes → Centrality → PEG robustness → CRISPR feasibility → GIVS ranking → Strategy → Pathogen risk → SJT explanation → Report (PDF + QR + JSON) 
+
+helixia pro
+
+2) V1 Roadmap (Phase-by-Phase)
+Phase 0 — Foundations (1–2 weeks)
+Deliverables
+
+Repo structure + versioning rules (dataset pack version, firmware/app version)
+
+SQLite schema finalized:
+
+traits.db, genes.db, variants.db, crispr.db, pathogen.db
+
+Index strategy (mandatory for Pi 4 smoothness):
+
+traits(trait_name), genes(gene_id, symbol), variants(chr,pos), crispr(pam_seed), pathogen(disease/pathogen/host_gene)
+
+“Session Engine” skeleton:
+
+session_id, inputs, outputs, scoring snapshots, SJT JSON nodes
+
+Acceptance checks
+
+Cold start < 10s on Pi 4
+
+Trait lookup and gene lookup each < 200 ms typical
+
+Phase 1 — Trait ↔ Gene Terminal + Smart Shortlisting (2–3 weeks)
+Deliverables
+
+Tab 1: trait input, offline mapping, gene reverse lookup 
+
+helixia pro
+
+Smart Gene Shortlisting AI (deterministic ranking to Top 3–5) 
+
+helixia pro
+
+Centrality precomputation stored in DB (no runtime heavy graph compute) 
+
+helixia pro
+
+Acceptance checks
+
+Trait query → Top genes list appears instantly (no UI stutter)
+
+Re-running same input produces identical output (determinism)
+
+Phase 2 — Variant & SNP Analyzer (2 weeks)
+Deliverables
+
+Tab 4: SNP input → gene context → impact category → trait association → edit viability indicator 
+
+helixia pro
+
+Confidence + fallback protocols when a variant is not present 
+
+helixia pro
+
+Acceptance checks
+
+Variant lookup < 300 ms typical
+
+“Missing data” outputs are structured and consistent (no blank states)
+
+Phase 3 — CRISPR Target Designer + Strategy Advisor (3–4 weeks)
+Deliverables
+
+Tab 2: guide suggestions + PAM options + GC% + heuristic off-target estimate 
+
+helixia pro
+
+CRISPR Strategy Advisor (knockout vs activation/repression, multiplex suggestion) 
+
+helixia pro
+
+Heuristic off-target via indexed seeds (NOT whole-genome alignment) 
+
+helixia pro
+
+Acceptance checks
+
+Guide design returns in < 1–2 seconds typical (Pi 4)
+
+Clear warning banners: “Guidance only — not wet-lab instruction”
+
+Phase 4 — Pathogen ↔ Host Resolver + Risk Prioritizer (2–3 weeks)
+Deliverables
+
+Tab 3: disease ↔ pathogen ↔ host genes mapping 
+
+helixia pro
+
+Pathogen Risk Prioritizer uses environment (PEG) + known associations 
+
+helixia pro
+
+Acceptance checks
+
+Disease input always returns a ranked list OR a confident fallback message
+
+Phase 5 — PEG Matrix + GIVS Scoring (3–5 weeks)
+Deliverables
+
+Tab 5: PEG Matrix forecasting with small deterministic scenario sets 
+
+helixia pro
+
+GIVS scoring:
+
+GIVS = αTs + βNc + γEr − δOt 
+
+helixia pro
+
+Robustness Er computed via variance across scenarios 
+
+helixia pro
+
+Acceptance checks
+
+PEG runs fast (bounded scenarios), no thermal throttling spirals
+
+Score breakdown shown + logged into SJT
+
+Phase 6 — SJT (Structured Justification Tree) + Report Generator (2–3 weeks)
+Deliverables
+
+SJT JSON explanation tree with triggered rules + score breakdown + confidence 
+
+helixia pro
+
+Tab 7: Professional Report Generator:
+
+PDF + QR payload + JSON export 
+
+helixia pro
+
+Dataset/firmware version stamped in every report 
+
+helixia pro
+
+Acceptance checks
+
+Reports are reproducible byte-for-byte for same session inputs (as much as practical)
+
+QR payload decodes and matches JSON summary
+
+Phase 7 — Demo Scenarios + Packaging (1–2 weeks)
+Deliverables
+
+“Drought-resilient rice” and “disease-resistant wheat” demo flows 
+
+helixia pro
+
+Demo mode: one-click run-through + export report
+
+Acceptance checks
+
+Demo finishes smoothly on Pi 4 with no lag (touch UX feels like an instrument)
+
+3) System Flowcharts (copy/paste-ready)
+3.1 G-DCE Pipeline Flow
+flowchart TD
+  A[Trait Input] --> B[Trait Resolution<br/>ontology mapping]
+  B --> C[Candidate Genes<br/>trait→gene shortlist]
+  C --> D[Network Centrality<br/>precomputed lookup]
+  D --> E[PEG Robustness<br/>scenario evaluation]
+  E --> F[CRISPR Feasibility<br/>PAM + seed off-target heuristic]
+  F --> G[GIVS Ranking<br/>αTs + βNc + γEr - δOt]
+  G --> H[Strategy Recommendation<br/>breed vs edit, single vs multiplex]
+  H --> I[SJT Explanation Tree<br/>scores + rules + confidence]
+  I --> J[Report Generator<br/>PDF + QR + JSON]
+3.2 Data/Compute Architecture Flow
+flowchart LR
+  UI[Touch UI] --> APP[Deterministic App Core]
+  APP --> SE[Session Engine]
+  APP --> DB[(SQLite DB Packs)]
+  DB --> T[traits.db]
+  DB --> G[genes.db]
+  DB --> V[variants.db]
+  DB --> C[crispr.db]
+  DB --> P[pathogen.db]
+  SE --> SJT[SJT JSON]
+  SE --> RPT[PDF/QR/JSON Report]
+3.3 Safety/Quality Guardrails Flow
+flowchart TD
+  X[User Input] --> Y[Validation Layer]
+  Y -->|OK| Z[Run Pipeline]
+  Y -->|Missing data| M[Fallback Protocol<br/>confidence low + explain why]
+  Z --> W[Warnings Banner Layer]
+  W --> R[Report with disclaimers<br/>+ version stamp]
+4) Electronics Required (V1 BOM) + Notes/Warnings/Alerts
+4.1 Core Compute + UI
+Required
+
+Raspberry Pi 4 (4GB is OK for V1) (you already have this)
+
+7-inch touchscreen (you already have this)
+
+Strongly recommended add-ons
+
+Storage: A2-rated microSD or USB 3.0 SSD (preferred for stability and fast DB reads)
+
+Cooling: heatsink + fan (or a good passive heatsink case)
+
+Alerts
+
+ALERT: Thermal throttling will cause UI lag and slow queries; cooling is not optional for “instrument feel”.
+
+ALERT: Cheap microSD cards cause random DB slowness and corruption risk.
+
+4.2 Power System (Portable “Instrument” Build)
+Required (portable mode)
+
+2S Li-ion pack (7.4V nominal) + 2S BMS (protection)
+
+5V / 5A buck converter (stable power to Pi + screen)
+
+Power switch + soft shutdown button (recommended)
+
+Recommended
+
+USB-C PD trigger (9V/12V) for flexible charging input
+
+Battery fuel gauge module (accurate battery %)
+
+RTC module (timestamp integrity in reports) 
+
+helixia pro
+
+Warnings
+
+WARNING: Power brownouts will corrupt the DB pack and reports. Use a stable 5V/5A supply and proper wiring.
+
+WARNING: No hard power-off while writing reports / updating DB packs. Always soft shutdown.
+
+4.3 Security / Integrity (Optional but “Patent-Strength” feel)
+Optional (recommended for V1+)
+
+Secure element for device-signed reports 
+
+helixia pro
+
+Notes
+
+Not needed to make V1 work, but it upgrades trust: “instrument-generated outputs” rather than “app output.”
+
+4.4 Suggested “Safe Build” Wiring Notes
+
+Use proper gauge wiring for 5A lines (don’t run Pi + screen through thin jumper wires).
+
+Add inline fuse on battery output.
+
+Keep buck converter output stable at 5.1V under load (Pi 4 is picky).
+
+5) Estimates (Time + Cost)
+5.1 Timeline Estimate (Solo Builder)
+
+Phase 0: 1–2 weeks
+
+Phase 1: 2–3 weeks
+
+Phase 2: 2 weeks
+
+Phase 3: 3–4 weeks
+
+Phase 4: 2–3 weeks
+
+Phase 5: 3–5 weeks
+
+Phase 6: 2–3 weeks
+
+Phase 7: 1–2 weeks
+
+Total (realistic)
+
+~16 to 24 weeks (4–6 months) for a clean V1 that feels like an instrument.
+
+5.2 Hardware Cost Estimate (Prototype)
+
+Since you already have Pi 4 + 7" screen, your incremental cost is mostly:
+
+Cooling + case: €15–€40
+
+Reliable storage (A2 microSD or SSD): €15–€60
+
+Portable power stack (battery + BMS + buck + PD trigger + wiring): €35–€120
+
+RTC: €3–€10
+
+Secure element (optional): €5–€25
+
+Total additional (typical)
+
+€70–€220 depending on whether you go fully portable and whether you add secure element.
+
+(The earlier full prototype BOM target around ~€335 includes compute module + carrier assumptions; your case is cheaper because you already own the big items.) 
+
+helixia pro
+
+6) “Warnings & Alerts” Section (to include in every internal build doc)
+Warnings
+
+Do not present outputs as medical/clinical guidance.
+
+CRISPR module is strategy + guide suggestion only; no wet-lab procedural instructions. 
+
+helixia pro
+
+Alerts
+
+Thermal throttling = broken UX. Add cooling.
+
+Unstable power = corrupted DB packs. Use 5V/5A stable supply + soft shutdown.
+
+DB updates must be signed/versioned; never mix packs without compatibility checks. 
+
+helixia pro

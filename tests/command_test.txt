@@ -1,0 +1,322 @@
+HELIXA PRO V1 — Commands-Heavy Setup & Development Guide
+
+(Designed for Raspberry Pi 4 + 7" touchscreen running the HELIXA PRO offline genetic reasoning system.)
+
+1. System Preparation
+Update OS
+# Update package lists
+sudo apt update
+
+# Upgrade installed packages
+sudo apt upgrade -y
+
+# Reboot after upgrade
+sudo reboot
+Install Core Development Tools
+# Install Python development stack
+sudo apt install -y python3 python3-pip python3-venv git sqlite3
+
+# Install build tools for scientific packages
+sudo apt install -y build-essential libatlas-base-dev
+
+# Verify Python version
+python3 --version
+
+Expected output:
+
+Python 3.11.x
+2. Project Directory Structure
+
+Create the project workspace.
+
+# Create project folder
+mkdir helixa-pro
+
+# Enter project folder
+cd helixa-pro
+
+# Create main directories
+mkdir app datasets reports logs scripts
+
+# Create module directories
+mkdir app/core
+mkdir app/modules
+mkdir app/db
+mkdir app/ui
+
+Resulting structure:
+
+helixa-pro
+ ├── app
+ │   ├── core
+ │   ├── modules
+ │   ├── db
+ │   └── ui
+ ├── datasets
+ ├── reports
+ ├── logs
+ └── scripts
+3. Python Virtual Environment
+Create Virtual Environment
+# Create venv
+python3 -m venv helixa_env
+Activate Environment
+source helixa_env/bin/activate
+
+Prompt should change to:
+
+(helixa_env) pi@raspberrypi:~/helixa-pro $
+4. Install Required Python Libraries
+# Core data stack
+pip install pandas numpy
+
+# Scientific libraries
+pip install networkx scipy
+
+# Database tools
+pip install sqlalchemy
+
+# CRISPR sequence utilities
+pip install biopython
+
+# UI framework
+pip install streamlit
+
+# Reporting
+pip install reportlab qrcode
+
+# Logging
+pip install loguru
+
+Save dependencies:
+
+pip freeze > requirements.txt
+5. SQLite Database Initialization
+
+Create database file.
+
+sqlite3 helixa.db
+
+Inside SQLite shell:
+
+-- Trait table
+CREATE TABLE traits (
+trait_id INTEGER PRIMARY KEY,
+trait_name TEXT,
+description TEXT
+);
+
+-- Gene table
+CREATE TABLE genes (
+gene_id INTEGER PRIMARY KEY,
+symbol TEXT,
+function TEXT
+);
+
+-- Variant table
+CREATE TABLE variants (
+variant_id INTEGER PRIMARY KEY,
+chr TEXT,
+position INTEGER,
+impact TEXT
+);
+
+-- CRISPR seeds
+CREATE TABLE crispr_targets (
+target_id INTEGER PRIMARY KEY,
+gene_symbol TEXT,
+pam TEXT,
+gc_content REAL
+);
+
+-- Pathogen mapping
+CREATE TABLE pathogens (
+pathogen_id INTEGER PRIMARY KEY,
+disease TEXT,
+host_gene TEXT
+);
+
+Exit SQLite:
+
+.quit
+
+Verify database:
+
+sqlite3 helixa.db ".tables"
+
+Expected output:
+
+traits genes variants crispr_targets pathogens
+6. Dataset Loading
+
+Place dataset packs into:
+
+datasets/
+
+Example structure:
+
+datasets/
+ ├── traits.csv
+ ├── genes.csv
+ ├── variants.csv
+ ├── crispr_targets.csv
+ └── pathogen_links.csv
+
+Load dataset into database.
+
+sqlite3 helixa.db
+
+Example import:
+
+.mode csv
+.import datasets/traits.csv traits
+.import datasets/genes.csv genes
+.import datasets/variants.csv variants
+
+Verify record counts:
+
+SELECT COUNT(*) FROM traits;
+SELECT COUNT(*) FROM genes;
+7. Core Application Entry Point
+
+Create application file.
+
+touch app/main.py
+
+Example starter code:
+
+# HELIXA PRO main launcher
+
+import streamlit as st
+
+st.title("HELIXA PRO V1")
+
+st.write("Offline Genetic Reasoning System")
+
+Run application.
+
+streamlit run app/main.py
+
+Access UI:
+
+http://localhost:8501
+8. Logging System
+
+Create logs directory.
+
+mkdir logs
+
+Add logging configuration.
+
+from loguru import logger
+
+logger.add("logs/system.log", rotation="10 MB")
+logger.info("HELIXA system started")
+9. Report Generation Script
+
+Create script.
+
+touch scripts/generate_report.py
+
+Example usage:
+
+python scripts/generate_report.py --session 001
+
+Outputs:
+
+reports/session_001.pdf
+reports/session_001.json
+10. System Flow (Execution Pipeline)
+User Input
+   │
+Trait Resolution
+   │
+Candidate Gene Shortlisting
+   │
+Network Centrality Analysis
+   │
+PEG Matrix Evaluation
+   │
+CRISPR Feasibility
+   │
+GIVS Scoring
+   │
+Strategy Recommendation
+   │
+Structured Justification Tree
+   │
+Report Generation
+11. Performance Optimization (Pi 4)
+
+Run database indexing.
+
+sqlite3 helixa.db
+CREATE INDEX idx_trait_name ON traits(trait_name);
+CREATE INDEX idx_gene_symbol ON genes(symbol);
+CREATE INDEX idx_variant_chr ON variants(chr,position);
+
+Exit SQLite:
+
+.quit
+12. System Startup Script
+
+Create startup script.
+
+touch start_helixa.sh
+
+Contents:
+
+#!/bin/bash
+
+cd ~/helixa-pro
+source helixa_env/bin/activate
+streamlit run app/main.py
+
+Make executable.
+
+chmod +x start_helixa.sh
+
+Run system:
+
+./start_helixa.sh
+13. Maintenance Commands
+Backup database
+cp helixa.db backups/helixa_backup_$(date +%F).db
+Monitor CPU temperature
+vcgencmd measure_temp
+Check system load
+htop
+14. Important Warnings
+
+⚠ Never power off the Raspberry Pi abruptly
+Database corruption may occur.
+
+Use:
+
+sudo shutdown now
+
+⚠ Use active cooling
+HELIXA computations and database queries can cause CPU throttling.
+
+⚠ Dataset version control is critical
+
+Store dataset versions:
+
+datasets/v1/
+datasets/v2/
+
+Never mix datasets between versions.
+
+15. Estimated Development Timeline
+Phase	Module	Duration
+Phase 0	Architecture setup	1–2 weeks
+Phase 1	Trait-gene reasoning	2–3 weeks
+Phase 2	Variant analysis	2 weeks
+Phase 3	CRISPR design	3–4 weeks
+Phase 4	Pathogen resolver	2–3 weeks
+Phase 5	PEG + GIVS scoring	3–5 weeks
+Phase 6	Reporting + SJT	2–3 weeks
+
+Total estimated build time:
+
+4–6 months
