@@ -1081,7 +1081,9 @@ export function normalizeInput(
   for (let i = 0; i < out3.length; i++) {
     const line = out3[i] ?? "";
 
-    const isAsciiStart = /^[+\-| ]{3,}/.test(line.trim()) || /^\|/.test(line.trim());
+    const isAsciiStart =
+      /^[+\-]{3,}/.test(line.trim()) ||
+      (/^\|[^|]*\|$/.test(line.trim()) && /^[+\-]/.test(out3[i - 1]?.trim() ?? ""));
     if (!isAsciiStart) {
       outAscii.push(line);
       continue;
@@ -1249,7 +1251,33 @@ export function normalizeInput(
     outTables.push(line);
   }
 
-  const outAfterTables = outTables;
+  // Table continuation repair
+  const outTablesFixed: string[] = [];
+
+  for (let i = 0; i < outTables.length; i++) {
+    const line = outTables[i] ?? "";
+    const prev = outTablesFixed[outTablesFixed.length - 1] ?? "";
+    const next = outTables[i + 1] ?? "";
+
+    const isPipeRow = /^\|.*\|$/.test(line.trim());
+    const prevIsTableRow = /^\|.*\|$/.test(prev.trim());
+
+    // If a pipe row appears after a blank line but follows a table
+    if (
+      isPipeRow &&
+      prev.trim() === "" &&
+      /^\|.*\|$/.test(outTablesFixed[outTablesFixed.length - 2] ?? "")
+    ) {
+      // remove blank line and attach row to table
+      outTablesFixed.pop();
+      outTablesFixed.push(line);
+      continue;
+    }
+
+    outTablesFixed.push(line);
+  }
+
+  const outAfterTables = outTablesFixed;
 
   // 3.75) Fence Repair v2 — prevent accidental fence closure inside code.
   const outFenceSafe: string[] = [];

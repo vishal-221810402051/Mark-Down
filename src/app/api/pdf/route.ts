@@ -3,7 +3,6 @@ import path from "node:path";
 import { NextResponse } from "next/server";
 import { chromium } from "playwright";
 
-import { normalizeInput } from "@/lib/normalize";
 import { parseMarkdownToHtml } from "@/lib/parse";
 import { renderMermaidToSvg } from "@/lib/mermaidRender";
 
@@ -151,9 +150,9 @@ export async function POST(req: Request) {
   const title = (body.title ?? "Mark-Down Document").toString();
 
   try {
-    const norm = normalizeInput(markdownRaw);
+    const normalizedText = markdownRaw;
 
-    const parsed = await parseMarkdownToHtml(norm.normalizedText, {
+    const parsed = await parseMarkdownToHtml(normalizedText, {
       includeToc,
       tocMaxDepth: tocDepth,
     });
