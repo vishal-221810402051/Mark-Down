@@ -46,6 +46,34 @@ type ExtractParams = {
   intelligence: DocIntelligence | null;
 };
 
+type LineContext = {
+  lines: string[];
+  trimmed: string[];
+  prevNonBlank: string[];
+  nextNonBlank: string[];
+};
+
+function buildLineContext(text: string): LineContext {
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  const trimmed = lines.map((line) => line.trim());
+  const prevNonBlank: string[] = new Array(lines.length).fill("");
+  const nextNonBlank: string[] = new Array(lines.length).fill("");
+
+  let last = "";
+  for (let i = 0; i < lines.length; i++) {
+    prevNonBlank[i] = last;
+    if (trimmed[i]) last = trimmed[i];
+  }
+
+  let next = "";
+  for (let i = lines.length - 1; i >= 0; i--) {
+    nextNonBlank[i] = next;
+    if (trimmed[i]) next = trimmed[i];
+  }
+
+  return { lines, trimmed, prevNonBlank, nextNonBlank };
+}
+
 function countBySeverity(items: DocDiagnostic[]) {
   return {
     info: items.filter((x) => x.severity === "info").length,
@@ -64,11 +92,10 @@ function pushUnique(items: DocDiagnostic[], item: DocDiagnostic) {
   if (!exists) items.push(item);
 }
 
-function findPlainCalloutCandidates(text: string): DocDiagnostic[] {
+function findPlainCalloutCandidates(ctx: LineContext): DocDiagnostic[] {
   const items: DocDiagnostic[] = [];
-  const lines = text.replace(/\r\n/g, "\n").split("\n");
-  for (const line of lines) {
-    const trimmed = line.trim();
+  for (let i = 0; i < ctx.lines.length; i++) {
+    const trimmed = ctx.trimmed[i] ?? "";
     const m = trimmed.match(/^(note|tip|warning|important|alert)\s*:\s*(.+)$/i);
     if (!m) continue;
 
@@ -83,12 +110,12 @@ function findPlainCalloutCandidates(text: string): DocDiagnostic[] {
   return items;
 }
 
-function findUnfencedCommandCandidates(text: string): DocDiagnostic[] {
+function findUnfencedCommandCandidates(ctx: LineContext): DocDiagnostic[] {
   const items: DocDiagnostic[] = [];
-  const lines = text.replace(/\r\n/g, "\n").split("\n");
   let inFence = false;
-  for (const line of lines) {
-    const trimmed = line.trim();
+  for (let i = 0; i < ctx.lines.length; i++) {
+    const line = ctx.lines[i] ?? "";
+    const trimmed = ctx.trimmed[i] ?? "";
 
     if (/^\s*```/.test(line)) {
       inFence = !inFence;
@@ -185,11 +212,9 @@ function findWeakSectionStructure(intelligence: DocIntelligence | null): DocDiag
   return items;
 }
 
-function findTableAmbiguity(text: string, intelligence: DocIntelligence | null): DocDiagnostic[] {
+function findTableAmbiguity(ctx: LineContext, intelligence: DocIntelligence | null): DocDiagnostic[] {
   const items: DocDiagnostic[] = [];
-  const lines = text.replace(/\r\n/g, "\n").split("\n");
-  const pipeyParagraphs = lines.filter((line) => {
-    const t = line.trim();
+  const pipeyParagraphs = ctx.trimmed.filter((t) => {
     return t.includes("|") && !/^\|.*\|$/.test(t) && t.length > 10;
   });
 
@@ -231,8 +256,7 @@ function findMermaidRisks(
   return items;
 }
 
-function suppressCommandContext(items: DocDiagnostic[], text: string): DocDiagnostic[] {
-  const lines = text.replace(/\r\n/g, "\n").split("\n");
+function suppressCommandContext(items: DocDiagnostic[], ctx: LineContext): DocDiagnostic[] {
   const suppressLabels = [
     /^expected output/i,
     /^verify database/i,
@@ -243,9 +267,9 @@ function suppressCommandContext(items: DocDiagnostic[], text: string): DocDiagno
 
   return items.filter((item) => {
     if (item.kind !== "unfenced_command_candidate") return true;
-    const idx = lines.findIndex((l) => l.trim() === (item.detail ?? ""));
+    const idx = ctx.trimmed.findIndex((t) => t === (item.detail ?? ""));
     if (idx <= 0) return true;
-    const prev = (lines[idx - 1] ?? "").trim();
+    const prev = ctx.trimmed[idx - 1] ?? "";
     return !suppressLabels.some((r) => r.test(prev));
   });
 }
@@ -266,15 +290,16 @@ function groupCommandWarnings(items: DocDiagnostic[]): DocDiagnostic[] {
 }
 
 function inferPlainCallouts(
-  text: string,
+  ctx: LineContext,
   intelligence: DocIntelligence | null,
 ): DocDiagnostic[] {
   const items: DocDiagnostic[] = [];
   const existing = intelligence?.callouts ?? [];
-  const lines = text.replace(/\r\n/g, "\n").split("\n");
 
-  for (const line of lines) {
-    const m = line.trim().match(/^(note|tip|warning|important|alert)\s*:/i);
+  for (let i = 0; i < ctx.lines.length; i++) {
+    const line = ctx.lines[i] ?? "";
+    const trimmed = ctx.trimmed[i] ?? "";
+    const m = trimmed.match(/^(note|tip|warning|important|alert)\s*:/i);
     if (!m) continue;
 
     const kind = m[1].toLowerCase();
@@ -284,7 +309,7 @@ function inferPlainCallouts(
       kind: "plain_callout_candidate",
       severity: "info",
       message: `Plain ${kind} callout candidate detected`,
-      detail: line.trim(),
+      detail: trimmed,
     });
   }
 
@@ -321,16 +346,17 @@ function gradeHeadingHierarchy(headings: DocHeading[]): HeadingHierarchyGrade {
 
 export function extractDocDiagnostics(params: ExtractParams): DocDiagnostics {
   const { normalizedText, notes, stats, renderedHtml, headings, intelligence } = params;
+  const ctx = buildLineContext(normalizedText);
 
   let items: DocDiagnostic[] = [];
 
-  items.push(...findPlainCalloutCandidates(normalizedText));
-  items.push(...findUnfencedCommandCandidates(normalizedText));
+  items.push(...findPlainCalloutCandidates(ctx));
+  items.push(...findUnfencedCommandCandidates(ctx));
   items.push(...findHeadingHierarchyIssues(headings));
   items.push(...findWeakSectionStructure(intelligence));
-  items.push(...findTableAmbiguity(normalizedText, intelligence));
+  items.push(...findTableAmbiguity(ctx, intelligence));
   items.push(...findMermaidRisks(normalizedText, renderedHtml, intelligence));
-  items.push(...inferPlainCallouts(normalizedText, intelligence));
+  items.push(...inferPlainCallouts(ctx, intelligence));
 
   if (stats.fencesAutoClosed > 0) {
     items.push({
@@ -348,7 +374,7 @@ export function extractDocDiagnostics(params: ExtractParams): DocDiagnostics {
     });
   }
 
-  items = suppressCommandContext(items, normalizedText);
+  items = suppressCommandContext(items, ctx);
   items = groupCommandWarnings(items);
 
   const documentType = inferDocumentType(intelligence);
