@@ -2,6 +2,13 @@ import type { DocIntelligence } from "./docIntelligence";
 import type { DocHeading, NormalizeStats } from "./docModel";
 
 export type DiagnosticSeverity = "info" | "warning" | "error";
+export type InferredDocumentType =
+  | "setup_guide"
+  | "roadmap"
+  | "architecture_doc"
+  | "technical_report"
+  | "mixed_document";
+export type HeadingHierarchyGrade = "strong" | "moderate" | "weak";
 
 export type DocDiagnosticKind =
   | "plain_callout_candidate"
@@ -25,6 +32,8 @@ export type DocDiagnostics = {
     warning: number;
     error: number;
   };
+  documentType: InferredDocumentType | null;
+  hierarchyGrade: HeadingHierarchyGrade;
 };
 
 type ExtractParams = {
@@ -222,21 +231,109 @@ function findMermaidRisks(
   return items;
 }
 
+function suppressCommandContext(items: DocDiagnostic[], text: string): DocDiagnostic[] {
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  const suppressLabels = [
+    /^expected output/i,
+    /^verify database/i,
+    /^run application/i,
+    /^access ui/i,
+    /^outputs/i,
+  ];
+
+  return items.filter((item) => {
+    if (item.kind !== "unfenced_command_candidate") return true;
+    const idx = lines.findIndex((l) => l.trim() === (item.detail ?? ""));
+    if (idx <= 0) return true;
+    const prev = (lines[idx - 1] ?? "").trim();
+    return !suppressLabels.some((r) => r.test(prev));
+  });
+}
+
+function groupCommandWarnings(items: DocDiagnostic[]): DocDiagnostic[] {
+  const commands = items.filter((i) => i.kind === "unfenced_command_candidate");
+  if (commands.length <= 2) return items;
+
+  const others = items.filter((i) => i.kind !== "unfenced_command_candidate");
+  return [
+    ...others,
+    {
+      kind: "unfenced_command_candidate",
+      severity: "warning",
+      message: `${commands.length} possible unfenced command lines detected`,
+    },
+  ];
+}
+
+function inferPlainCallouts(
+  text: string,
+  intelligence: DocIntelligence | null,
+): DocDiagnostic[] {
+  const items: DocDiagnostic[] = [];
+  const existing = intelligence?.callouts ?? [];
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
+
+  for (const line of lines) {
+    const m = line.trim().match(/^(note|tip|warning|important|alert)\s*:/i);
+    if (!m) continue;
+
+    const kind = m[1].toLowerCase();
+    if (existing.some((c) => c.kind === kind)) continue;
+
+    items.push({
+      kind: "plain_callout_candidate",
+      severity: "info",
+      message: `Plain ${kind} callout candidate detected`,
+      detail: line.trim(),
+    });
+  }
+
+  return items;
+}
+
+function inferDocumentType(intelligence: DocIntelligence | null): InferredDocumentType | null {
+  if (!intelligence) return null;
+  const s = intelligence.stats;
+  if (s.commandBlocks > 10) return "setup_guide";
+  if (s.roadmaps > 5) return "roadmap";
+  if (s.tables > 5) return "architecture_doc";
+  if (s.diagrams > 2 && s.procedures > 1) return "technical_report";
+  return "mixed_document";
+}
+
+function gradeHeadingHierarchy(headings: DocHeading[]): HeadingHierarchyGrade {
+  if (headings.length === 0) return "weak";
+
+  const h1 = headings.filter((h) => h.depth === 1).length;
+  if (h1 !== 1) return "moderate";
+
+  let jumps = 0;
+  for (let i = 1; i < headings.length; i++) {
+    const prev = headings[i - 1];
+    const curr = headings[i];
+    if (!prev || !curr) continue;
+    if (curr.depth - prev.depth > 1) jumps++;
+  }
+
+  if (jumps > 0) return "moderate";
+  return "strong";
+}
+
 export function extractDocDiagnostics(params: ExtractParams): DocDiagnostics {
   const { normalizedText, notes, stats, renderedHtml, headings, intelligence } = params;
 
-  const items: DocDiagnostic[] = [];
+  let items: DocDiagnostic[] = [];
 
-  for (const item of findPlainCalloutCandidates(normalizedText)) items.push(item);
-  for (const item of findUnfencedCommandCandidates(normalizedText)) items.push(item);
-  for (const item of findHeadingHierarchyIssues(headings)) items.push(item);
-  for (const item of findWeakSectionStructure(intelligence)) items.push(item);
-  for (const item of findTableAmbiguity(normalizedText, intelligence)) items.push(item);
-  for (const item of findMermaidRisks(normalizedText, renderedHtml, intelligence))
-    items.push(item);
+  items.push(...findPlainCalloutCandidates(normalizedText));
+  items.push(...findUnfencedCommandCandidates(normalizedText));
+  items.push(...findHeadingHierarchyIssues(headings));
+  items.push(...findWeakSectionStructure(intelligence));
+  items.push(...findTableAmbiguity(normalizedText, intelligence));
+  items.push(...findMermaidRisks(normalizedText, renderedHtml, intelligence));
+  items.push(...inferPlainCallouts(normalizedText, intelligence));
 
   if (stats.fencesAutoClosed > 0) {
-    pushUnique(items, {
+    items.push({
       kind: "weak_section_structure",
       severity: "info",
       message: `Normalizer auto-closed ${stats.fencesAutoClosed} code fence(s)`,
@@ -244,15 +341,23 @@ export function extractDocDiagnostics(params: ExtractParams): DocDiagnostics {
   }
 
   if (notes.some((n) => /converted wrapped table/i.test(n))) {
-    pushUnique(items, {
+    items.push({
       kind: "table_ambiguity",
       severity: "info",
       message: "Normalizer converted one or more wrapped tables",
     });
   }
 
+  items = suppressCommandContext(items, normalizedText);
+  items = groupCommandWarnings(items);
+
+  const documentType = inferDocumentType(intelligence);
+  const hierarchyGrade = gradeHeadingHierarchy(headings);
+
   return {
     items,
     summary: countBySeverity(items),
+    documentType,
+    hierarchyGrade,
   };
 }

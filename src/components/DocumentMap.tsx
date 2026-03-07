@@ -118,6 +118,16 @@ export default function DocumentMap({
             {diagnostics.summary.error} errors · {diagnostics.summary.warning} warnings ·{" "}
             {diagnostics.summary.info} info
           </div>
+          {diagnostics?.documentType && (
+            <div className="mt-2 text-xs text-white/50">
+              Document type: {diagnostics.documentType}
+            </div>
+          )}
+          {diagnostics?.hierarchyGrade && (
+            <div className="text-xs text-white/50">
+              Heading structure: {diagnostics.hierarchyGrade}
+            </div>
+          )}
           <div className="mt-3 space-y-2">
             {diagnostics.items.slice(0, 5).map((item, i) => (
               <div
