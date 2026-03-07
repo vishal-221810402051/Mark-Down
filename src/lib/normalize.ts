@@ -1,4 +1,4 @@
-import type { NormalizeResult, NormalizeStats } from "./docModel";
+import type { NormalizeOptions, NormalizeResult, NormalizeStats } from "./docModel";
 
 const MERMAID_HINTS = [
   "graph TD",
@@ -46,6 +46,7 @@ function looksLikeCodeLine(line: string): boolean {
 function looksLikeCodeStart(line: string): boolean {
   const s = line.trim();
   if (!s) return false;
+  if (/^function\s+TEXT\b/i.test(s)) return false;
   return (
     /^\/\//.test(s) ||
     /^#/.test(s) ||
@@ -75,6 +76,13 @@ function guessCodeLang(lines: string[]): string {
   const text = lines.join("\n");
 
   if (/^\s*[{[]/.test(lines[0] ?? "") && /"\w+"\s*:/.test(text)) return "json";
+  if (
+    /\b(CREATE TABLE|PRIMARY KEY|INTEGER|TEXT|REAL|SELECT COUNT\(\*\)|CREATE INDEX)\b/i.test(
+      text,
+    )
+  ) {
+    return "sql";
+  }
   if (/\b(def|import|from|class)\b/.test(text) && !/[;{}]/.test(text))
     return "python";
   if (
@@ -163,6 +171,24 @@ function isNumberHeading(line: string): boolean {
   return /^\s*\d+(?:\.\d+)*\s+/.test(line);
 }
 
+function isLikelyNumberedSectionTitle(line: string): boolean {
+  const s = line.trim();
+
+  if (!s) return false;
+  if (!/^\d+[.)]\s+/.test(s)) return false;
+  if (isLikelyCommand(s)) return false;
+  if (looksLikeCodeStart(s) || looksLikeCodeLineGeneric(s)) return false;
+  if (isLikelyTableLike(s)) return false;
+  if (isLikelyDiagramLike(s)) return false;
+
+  const body = s.replace(/^\d+[.)]\s+/, "").trim();
+  if (!body) return false;
+  if (body.length > 90) return false;
+  if (/^[a-z]/.test(body)) return false;
+
+  return true;
+}
+
 function isStrongBoundary(line: string): boolean {
   // Do NOT include "# " because it appears in bash/python comments.
   return (
@@ -195,6 +221,10 @@ function isListLine(line: string): boolean {
 }
 
 function detectTableHeader(line: string): { mode: "spacing" | "pipes"; cols: string[] } | null {
+  if (looksLikeSectionTitle(line)) {
+    return null;
+  }
+
   const pipes = splitColumnsByPipes(line);
   if (pipes.length >= 2) return { mode: "pipes", cols: pipes };
 
@@ -218,10 +248,12 @@ function isLikelyCommand(line: string): boolean {
 
   return (
     /^(npm|pnpm|yarn)\s+/.test(s) ||
-    /^(pip|python|uvicorn|gunicorn)\s+/.test(s) ||
+    /^(pip|pip3|python|python3|uvicorn|gunicorn|streamlit|sqlite3)\s+/.test(s) ||
     /^(docker|docker-compose)\s+/.test(s) ||
     /^git\s+/.test(s) ||
     /^(curl|wget)\s+/.test(s) ||
+    /^(mkdir|cd|touch|chmod|chown|cp|mv|rm|ls|cat|echo|source|export)\s+/.test(s) ||
+    /^(apt|apt-get)\s+/.test(s) ||
     /^sudo\s+/.test(s)
   );
 }
@@ -242,10 +274,212 @@ function isListItem(line: string): boolean {
   return /^\s*(?:[-+*]|\d+\.)\s+/.test(line);
 }
 
+function looksLikeSectionTitle(line: string): boolean {
+  const raw = line.trim();
+  if (!raw) return false;
+  const s = raw
+    .replace(/^\d+(?:\.\d+)*[.)]?\s+/, "")
+    .replace(/^["'“”‘’]+/, "")
+    .trim();
+  if (!s) return false;
+
+  const patterns = [
+    /^project goal\b/i,
+    /^project overview\b/i,
+    /^core concept\b/i,
+    /^functional workflow\b/i,
+    /^key features\b/i,
+    /^hardware platform\b/i,
+    /^hardware cost estimate\b/i,
+    /^software architecture\b/i,
+    /^database structure\b/i,
+    /^development roadmap\b/i,
+    /^system flowcharts\b/i,
+    /^electronics required\b/i,
+    /^estimates?\b/i,
+    /^warnings?\s*&\s*alerts?\b/i,
+    /^system alerts?\s*&\s*warnings?\b/i,
+    /^project objective\b/i,
+    /^v1 roadmap\b/i,
+  ];
+
+  return patterns.some((p) => p.test(s));
+}
+
+function isLikelySetupLabel(line: string): boolean {
+  const s = line.trim();
+  const label = s.replace(/[.:;!?]+$/, "").trim();
+
+  if (!label) return false;
+  if (label.length > 72) return false;
+  if (!/^[A-Z]/.test(label)) return false;
+  if (isLikelyCommand(label)) return false;
+  if (looksLikeCodeStart(label) || looksLikeCodeLineGeneric(label)) return false;
+  if (isLikelyTableLike(label) || isLikelyDiagramLike(label)) return false;
+
+  return /(?:Create|Install|Run|Verify|Load|Save|Activate|Initialize|Add|Make|Backup|Monitor|Check|Access|Exit|Place|Resulting|Expected|Contents|Update|Example|Inside|Outputs)/.test(
+    label,
+  );
+}
+
+function isLikelySqlLike(text: string): boolean {
+  return /\b(CREATE TABLE|PRIMARY KEY|INTEGER|TEXT|REAL|SELECT COUNT\(\*\)|CREATE INDEX)\b/i.test(
+    text,
+  );
+}
+
+function nextNonBlankLine(lines: string[], start: number): string {
+  for (let i = start; i < lines.length; i++) {
+    const s = lines[i]?.trim() ?? "";
+    if (s) return lines[i] ?? "";
+  }
+  return "";
+}
+
+function isTitleCaseLike(line: string): boolean {
+  const words = line.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return false;
+
+  return words.every((w) => {
+    if (/^[A-Z0-9][A-Z0-9\-\u2013()&/]*$/.test(w)) return true;
+    return /^[A-Z][a-z0-9\-\u2013()&/]*$/.test(w);
+  });
+}
+
+function isUppercaseLike(line: string): boolean {
+  const s = line.trim();
+  return /^[A-Z0-9\s\-\u2013()&/]+$/.test(s) && /[A-Z]/.test(s);
+}
+
+function isLikelyTableLike(line: string): boolean {
+  return splitColumnsBySpacing(line).length >= 2 || splitColumnsByPipes(line).length >= 2;
+}
+
+function isLikelyDiagramLike(line: string): boolean {
+  const s = line.trim();
+  return (
+    looksAsciiDiagram(line) ||
+    /^(graph TD|graph LR|flowchart|sequenceDiagram|classDiagram|stateDiagram|erDiagram|journey|gantt)\b/.test(
+      s,
+    ) ||
+    /[\u2193\u2192\u2190\u2191]/.test(s)
+  );
+}
+
+function isLikelyProcedureLabel(line: string): boolean {
+  return /^(Steps|Workflow|Procedure|Checklist|Validation|Run)\s*:?$/i.test(line.trim());
+}
+
+function isLikelyInstructionLabel(line: string, nextNonBlank: string): boolean {
+  const s = line.trim();
+  if (!s) return false;
+
+  const imperativeLike =
+    /^[A-Z][a-z]+(?:\s+[a-z][a-z0-9\-()]*){0,5}$/.test(s) && !/[.:;!?]$/.test(s);
+  if (!imperativeLike) return false;
+
+  return (
+    isLikelyCommand(nextNonBlank) ||
+    looksLikeCodeStart(nextNonBlank) ||
+    looksLikeCodeLineGeneric(nextNonBlank) ||
+    /^(touch|mkdir|cd|chmod|source|sqlite3|python3|pip|streamlit|sudo)\b/.test(
+      nextNonBlank.trim(),
+    ) ||
+    /^[\u251C\u2514\u2502]/.test(nextNonBlank.trim())
+  );
+}
+
+function nextLooksLikeCommandBlock(next: string): boolean {
+  const s = next.trim();
+  if (!s) return false;
+
+  return (
+    isLikelyCommand(s) ||
+    looksLikeCodeStart(s) ||
+    looksLikeCodeLineGeneric(s) ||
+    /^[a-z0-9_-]+\s+[a-z]/.test(s) ||
+    /^[a-z0-9_-]+\s+-/.test(s) ||
+    /^[A-Za-z0-9_-]+\s+--/.test(s) ||
+    /^\$/.test(s)
+  );
+}
+
+function isLikelySemanticHeadingLine(line: string): boolean {
+  const s = line.trim();
+  if (!s) return false;
+  if (s.length > 72) return false;
+  if (/^(ALERT|WARNING|NOTE|TIP)\s*:/i.test(s)) return false;
+  if (/^(Recommended|Notes|Alerts|Warnings)$/i.test(s)) return false;
+  if (/[:.;!?]$/.test(s)) return false;
+  if (/^\d+(?:\.\d+)*\s+/.test(s)) return false;
+  if (/^\d+\.\s+/.test(s)) return false;
+  if (/^[-*+]\s+/.test(s)) return false;
+  if (isLikelyProcedureLabel(s)) return false;
+  if (isLikelyCommand(s)) return false;
+  if (looksLikeCodeStart(s) || looksLikeCodeLineGeneric(s)) return false;
+  if (isLikelyTableLike(s)) return false;
+  if (isLikelyDiagramLike(s)) return false;
+
+  const words = s.split(/\s+/).filter(Boolean);
+  if (words.length < 1 || words.length > 6) return false;
+  return isTitleCaseLike(s) || isUppercaseLike(s);
+}
+
+function shouldPromoteSemanticHeading(
+  line: string,
+  prev: string,
+  next: string,
+  nextNonBlank: string,
+): boolean {
+  const sectionTitleLike = looksLikeSectionTitle(line);
+  const semanticLike = isLikelySemanticHeadingLine(line) || sectionTitleLike;
+  if (!semanticLike) return false;
+  if (!sectionTitleLike && prev.trim() !== "") return false;
+
+  const nextStartsStructuredBlock =
+    next.trim() === "" ||
+    isLikelyTableLike(next) ||
+    isFenceOpenLine(next) !== null ||
+    isLikelyCommand(nextNonBlank) ||
+    looksLikeCodeStart(nextNonBlank) ||
+    looksLikeCodeLineGeneric(nextNonBlank);
+  if (!nextStartsStructuredBlock) return false;
+  if (nextLooksLikeCommandBlock(nextNonBlank)) return false;
+  if (isLikelyInstructionLabel(line, nextNonBlank)) return false;
+  return true;
+}
+
+function isSemanticBoundary(
+  lines: string[],
+  index: number,
+): boolean {
+  const line = lines[index] ?? "";
+
+  if (
+    isMarkdownHeading(line) ||
+    isNumberHeading(line) ||
+    isSeparator(line) ||
+    isBlockquote(line)
+  ) {
+    return true;
+  }
+
+  if (isFenceOpenLine(line) !== null) return true;
+
+  if (isLikelySemanticHeadingLine(line)) {
+    return true;
+  }
+
+  return false;
+}
+
 /**
  * Phase 4/7: deterministic Smart Normalizer.
  */
-export function normalizeInput(rawText: string): NormalizeResult {
+export function normalizeInput(
+  rawText: string,
+  options: NormalizeOptions = {},
+): NormalizeResult {
   const notes: string[] = [];
   const stats: NormalizeStats = {
     fencesAutoClosed: 0,
@@ -256,6 +490,7 @@ export function normalizeInput(rawText: string): NormalizeResult {
     mermaidBlocksCreated: 0,
     tablesConverted: 0,
   };
+  const inferSemanticHeadings = options.inferSemanticHeadings ?? false;
 
   // 0) Normalize line endings + trim trailing whitespace.
   const text = rawText.replace(/\r\n/g, "\n").replace(/[ \t]+\n/g, "\n");
@@ -263,6 +498,7 @@ export function normalizeInput(rawText: string): NormalizeResult {
 
   // 1) Heading + bullet/number normalization.
   const out1: string[] = [];
+  let semanticTitleAssigned = false;
   let inFence0 = false;
   for (let i = 0; i < lines.length; i++) {
     let line = lines[i] ?? "";
@@ -280,8 +516,20 @@ export function normalizeInput(rawText: string): NormalizeResult {
       continue;
     }
 
-    // Treat "# ..." as heading only when separated by a blank line.
+    if (/^helixia pro$/i.test(line.trim())) {
+      continue;
+    }
+
+    // Preserve shell-style comments as text when they introduce command/code blocks.
     if (/^\s*#\s+/.test(line)) {
+      const nextNonBlank = nextNonBlankLine(lines, i + 1);
+      if (nextLooksLikeCommandBlock(nextNonBlank)) {
+        line = line.replace(/^(\s*)#\s+/, "$1\\# ");
+        out1.push(line);
+        continue;
+      }
+
+      // Treat "# ..." as heading only when separated by a blank line.
       const prev = (lines[i - 1] ?? "").trim();
       if (prev !== "") {
         out1.push(line);
@@ -289,12 +537,16 @@ export function normalizeInput(rawText: string): NormalizeResult {
       }
     }
 
+    const preserveListLine =
+      isListLine(line) &&
+      !(inferSemanticHeadings && isLikelyNumberedSectionTitle(line));
+
     if (
       isMarkdownHeading(line) ||
       isNumberHeading(line) ||
       isBlockquote(line) ||
       isSeparator(line) ||
-      isListLine(line) ||
+      preserveListLine ||
       looksAsciiDiagram(line)
     ) {
       out1.push(line);
@@ -349,6 +601,48 @@ export function normalizeInput(rawText: string): NormalizeResult {
       if (prev === "" && next === "") {
         out1.push(`## ${line.trim()}`);
         notes.push(`Promoted to heading: ## ${line.trim()}`);
+        stats.headingsFixed++;
+        continue;
+      }
+    }
+
+    if (inferSemanticHeadings) {
+      const prev = lines[i - 1] ?? "";
+      const next = lines[i + 1] ?? "";
+      const nextNonBlank = nextNonBlankLine(lines, i + 1);
+
+      if (isLikelyNumberedSectionTitle(line)) {
+        const body = line.trim().replace(/^\d+[.)]\s+/, "").trim();
+        out1.push(`## ${body}`);
+        notes.push(`Promoted numbered section title: ${body}`);
+        stats.headingsFixed++;
+        continue;
+      }
+
+      if (!semanticTitleAssigned && i === 0 && isLikelySemanticHeadingLine(line)) {
+        out1.push(`# ${line.trim()}`);
+        notes.push(`Detected document title: ${line.trim()}`);
+        stats.headingsFixed++;
+        semanticTitleAssigned = true;
+        continue;
+      }
+
+      if (
+        semanticTitleAssigned &&
+        i === 1 &&
+        isLikelySemanticHeadingLine(line) &&
+        (lines[i - 1] ?? "").trim() !== "" &&
+        (lines[i + 1] ?? "").trim() === ""
+      ) {
+        out1.push(`## ${line.trim()}`);
+        notes.push(`Detected semantic subtitle: ${line.trim()}`);
+        stats.headingsFixed++;
+        continue;
+      }
+
+      if (shouldPromoteSemanticHeading(line, prev, next, nextNonBlank)) {
+        out1.push(`## ${line.trim()}`);
+        notes.push(`Promoted semantic heading: ${line.trim()}`);
         stats.headingsFixed++;
         continue;
       }
@@ -471,13 +765,89 @@ export function normalizeInput(rawText: string): NormalizeResult {
     out2.push(line);
   }
 
+  // 2.1) Setup-label + following command/code grouping.
+  const out2setup: string[] = [];
+  let inFenceSetup = false;
+  for (let i = 0; i < out2.length; i++) {
+    const line = out2[i] ?? "";
+
+    if (isFenceLine(line)) {
+      inFenceSetup = !inFenceSetup;
+      out2setup.push(line);
+      continue;
+    }
+
+    if (inFenceSetup) {
+      out2setup.push(line);
+      continue;
+    }
+
+    if (isLikelySetupLabel(line)) {
+      const block: string[] = [];
+      let j = i + 1;
+
+      while (j < out2.length) {
+        const nxt = out2[j] ?? "";
+        const t = nxt.trim();
+
+        if (!t) {
+          if (block.length > 0) break;
+          j++;
+          continue;
+        }
+
+        if (
+          isMarkdownHeading(nxt) ||
+          isNumberHeading(nxt) ||
+          isSeparator(nxt) ||
+          isBlockquote(nxt) ||
+          isLikelySemanticHeadingLine(nxt) ||
+          looksLikeSectionTitle(nxt) ||
+          isLikelyNumberedSectionTitle(nxt)
+        ) {
+          break;
+        }
+
+      if (
+        isLikelyCommand(nxt) ||
+        looksLikeCodeStart(nxt) ||
+        looksLikeCodeLineGeneric(nxt) ||
+        /^\s*#\s+/.test(nxt) ||
+        /^\s*\\#\s+/.test(nxt) ||
+        /^\s*--/.test(nxt)
+      ) {
+          block.push(nxt);
+          j++;
+          continue;
+        }
+
+        break;
+      }
+
+      if (block.length >= 1) {
+        const lang = guessCodeLang(block);
+        out2setup.push(line);
+        out2setup.push("");
+        out2setup.push(`\`\`\`${lang}`);
+        out2setup.push(...block);
+        out2setup.push("```");
+        out2setup.push("");
+        notes.push(`Wrapped setup block under "${line.trim()}" as \`\`\`${lang}`);
+        i = j - 1;
+        continue;
+      }
+    }
+
+    out2setup.push(line);
+  }
+
   // 2.5) Auto-fence unfenced multi-line code blocks.
   // 2.25) Commands label block -> fenced code (prevents Markdown from collapsing lines)
   const out2b: string[] = [];
   let inFenceCmd = false;
 
-  for (let i = 0; i < out2.length; i++) {
-    const line = out2[i] ?? "";
+  for (let i = 0; i < out2setup.length; i++) {
+    const line = out2setup[i] ?? "";
 
     if (isFenceLine(line)) {
       inFenceCmd = !inFenceCmd;
@@ -495,8 +865,8 @@ export function normalizeInput(rawText: string): NormalizeResult {
       const isCommandish = (ln: string) =>
         isLikelyCommand(ln) || /^\s*#\s+/.test(ln) || ln.trim() === "";
 
-      while (j < out2.length) {
-        const nxt = out2[j] ?? "";
+      while (j < out2setup.length) {
+        const nxt = out2setup[j] ?? "";
         if (isFenceLine(nxt)) break;
         // allow command lines, shell comments, and blanks
         if (isCommandish(nxt)) {
@@ -572,7 +942,8 @@ export function normalizeInput(rawText: string): NormalizeResult {
       continue;
     }
 
-    if (looksLikeCodeStart(line)) {
+    const sqlLikeStart = isLikelySqlLike(line);
+    if (looksLikeCodeStart(line) || sqlLikeStart) {
       const block: string[] = [line];
       let j = i + 1;
       let blankCount = 0;
@@ -584,8 +955,12 @@ export function normalizeInput(rawText: string): NormalizeResult {
         if (/^\s*#{1,6}\s+/.test(nxt)) break;
         if (/^\s*[-*]\s+/.test(nxt)) break;
         if (/^\s*\d+\.\s+/.test(nxt)) break;
+        if (/^\s*\d+\)\s+/.test(nxt)) break;
+        if (isSeparator(nxt)) break;
+        if (isBlockquote(nxt)) break;
 
         if (nxt.trim() === "") {
+          if (sqlLikeStart) break;
           blankCount++;
           if (blankCount > 1) break;
           block.push(nxt);
@@ -594,6 +969,11 @@ export function normalizeInput(rawText: string): NormalizeResult {
         }
 
         blankCount = 0;
+        if (sqlLikeStart) {
+          block.push(nxt);
+          j++;
+          continue;
+        }
         if (!looksLikeCodeLineGeneric(nxt)) break;
 
         block.push(nxt);
@@ -640,7 +1020,10 @@ export function normalizeInput(rawText: string): NormalizeResult {
         let j = i + 1;
         while (j < outCodeFenced.length) {
           const nxt = outCodeFenced[j] ?? "";
-          if (nxt.trim() === "") break;
+          const nxtTrimmed = nxt.trim();
+          if (!nxtTrimmed) break;
+          if (/^\d+\.\d+/.test(nxtTrimmed)) break;
+          if (/^(flowchart|graph|sequenceDiagram)/.test(nxtTrimmed)) break;
           if (isBlockBoundary(nxt)) break;
           block.push(nxt);
           j++;
@@ -740,7 +1123,7 @@ export function normalizeInput(rawText: string): NormalizeResult {
           for (let k = 1; k < block.length; k++) {
             const ln = block[k] ?? "";
             if (ln.trim() === "") break;
-            if (isBlockBoundary(ln)) break;
+            if (isSemanticBoundary(out3, i + k)) break;
 
             const cols =
               mode === "spacing" ? splitColumnsBySpacing(ln) : splitColumnsByPipes(ln);
