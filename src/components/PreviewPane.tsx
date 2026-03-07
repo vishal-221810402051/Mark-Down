@@ -27,6 +27,12 @@ function isMermaidCodeBlock(codeEl: Element): boolean {
 
 function inferLangFromPre(pre: HTMLElement): string {
   const code = pre.querySelector("code");
+  const codeDataLang = (code?.getAttribute("data-language") ?? "").trim();
+  if (codeDataLang) return codeDataLang.toLowerCase();
+
+  const preDataLang = (pre.getAttribute("data-language") ?? "").trim();
+  if (preDataLang) return preDataLang.toLowerCase();
+
   const cls = code?.getAttribute("class") ?? "";
   const m = cls.match(/(?:language|lang)-([a-z0-9_-]+)/i);
   if (m?.[1]) return m[1].toLowerCase();
@@ -60,6 +66,13 @@ function displayLang(lang: string): string {
 
 function getPreText(pre: HTMLElement): string {
   return pre.innerText ?? "";
+}
+
+function normalizeMermaid(text: string): string {
+  return text
+    .replace(/\r\n/g, "\n")
+    .replace(/\n{2,}/g, "\n")
+    .replace(/^\s+|\s+$/g, "");
 }
 
 function assignPreviewAnchors(root: HTMLElement): void {
@@ -102,70 +115,96 @@ export default function PreviewPane({
   useEffect(() => {
     const root = ref.current;
     if (!root) return;
+    let cancelled = false;
+    let rafId = 0;
+
+    const asciiBlocks = Array.from(root.querySelectorAll("p")).filter((p) =>
+      /^[+|\- ]{5,}/.test((p.textContent ?? "").trim()),
+    );
+
+    asciiBlocks.forEach((p) => {
+      const pre = document.createElement("pre");
+      pre.className = "ascii-diagram";
+      pre.textContent = p.textContent ?? "";
+      p.replaceWith(pre);
+    });
 
     const codeBlocks = root.querySelectorAll("pre");
     codeBlocks.forEach((pre) => {
+      const language = inferLangFromPre(pre as HTMLElement);
+      if (language === "ascii") {
+        pre.classList.add("ascii-diagram");
+        return;
+      }
+
       const txt = pre.textContent ?? "";
       const looksAscii =
         /(\+[-=]{2,}\+)|(\|.{0,40}\|)|(-->)|(==>)|(\b[v^]\b)/.test(txt);
       if (looksAscii) pre.classList.add("ascii-diagram");
     });
 
-    const mermaidBlocks = Array.from(root.querySelectorAll("pre > code")).filter(
-      (code) => isMermaidCodeBlock(code),
-    );
+    rafId = requestAnimationFrame(() => {
+      if (cancelled) return;
 
-    if (mermaidBlocks.length > 0) {
-      mermaidBlocks.forEach(async (codeEl) => {
-        const pre = codeEl.parentElement as HTMLElement | null;
-        if (!pre) return;
-        if (pre.getAttribute("data-mermaid-rendered") === "1") return;
+      const mermaidBlocks = Array.from(root.querySelectorAll("pre > code")).filter(
+        (code) => isMermaidCodeBlock(code),
+      );
 
-        const code = codeEl.textContent ?? "";
-        pre.setAttribute("data-mermaid-rendered", "1");
+      if (mermaidBlocks.length > 0) {
+        mermaidBlocks.forEach(async (codeEl) => {
+          if (cancelled) return;
+          const pre = codeEl.parentElement as HTMLElement | null;
+          if (!pre) return;
+          if (pre.getAttribute("data-mermaid-rendered") === "1") return;
 
-        const placeholder = document.createElement("div");
-        placeholder.className =
-          "mermaid-pending my-3 rounded-lg border bg-white p-3 text-xs text-gray-500";
-        placeholder.textContent = "Rendering diagram...";
-        pre.replaceWith(placeholder);
+          const code = normalizeMermaid(codeEl.textContent ?? "");
+          pre.setAttribute("data-mermaid-rendered", "1");
 
-        try {
-          const res = await fetch("/api/mermaid", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ code }),
-          });
-          const data = await res.json();
-          if (!res.ok) {
-            throw new Error(
-              typeof data?.error === "string" ? data.error : "Mermaid render failed",
-            );
-          }
-
-          const wrap = document.createElement("div");
-          wrap.className =
-            "mermaid-diagram my-4 overflow-auto rounded-lg border bg-white p-3";
-          wrap.innerHTML = data.svg;
-          placeholder.replaceWith(wrap);
-          assignPreviewAnchors(root);
-        } catch (e: unknown) {
-          const message = e instanceof Error ? e.message : "unknown error";
+          const placeholder = document.createElement("div");
           placeholder.className =
-            "mermaid-error my-3 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700";
-          placeholder.textContent = `Diagram render failed: ${message}`;
-          assignPreviewAnchors(root);
-        }
-      });
-    }
+            "mermaid-pending my-3 rounded-lg border bg-white p-3 text-xs text-gray-500";
+          placeholder.textContent = "Rendering diagram...";
+          pre.replaceWith(placeholder);
+
+          try {
+            const res = await fetch("/api/mermaid", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ code }),
+            });
+            const data = await res.json();
+            if (!res.ok) {
+              throw new Error(
+                typeof data?.error === "string" ? data.error : "Mermaid render failed",
+              );
+            }
+
+            const wrap = document.createElement("div");
+            wrap.className =
+              "mermaid-diagram my-4 overflow-auto rounded-lg border bg-white p-3";
+            wrap.innerHTML = data.svg;
+            placeholder.replaceWith(wrap);
+            assignPreviewAnchors(root);
+          } catch (e: unknown) {
+            const message = e instanceof Error ? e.message : "unknown error";
+            placeholder.className =
+              "mermaid-error my-3 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700";
+            placeholder.textContent = `Diagram render failed: ${message}`;
+            assignPreviewAnchors(root);
+          }
+        });
+      }
+    });
 
     // Wrap code blocks as "codecards" with header + copy button
     const pres = Array.from(root.querySelectorAll("pre")) as HTMLElement[];
 
     pres.forEach((pre) => {
+      if (pre.classList.contains("ascii-diagram")) return;
       if (pre.closest(".codecard")) return;
 
       const lang = inferLangFromPre(pre);
+      if (lang === "ascii") return;
       const label = displayLang(lang);
 
       const wrapper = document.createElement("div");
@@ -207,6 +246,11 @@ export default function PreviewPane({
     });
 
     assignPreviewAnchors(root);
+
+    return () => {
+      cancelled = true;
+      if (rafId) cancelAnimationFrame(rafId);
+    };
   }, [renderedHtml]);
 
   return (

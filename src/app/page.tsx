@@ -30,6 +30,7 @@ export default function HomePage() {
   const [theme, setTheme] = useState<Theme>("whitepaper");
   const [includeToc, setIncludeToc] = useState<boolean>(true);
   const [tocDepth, setTocDepth] = useState<2 | 3 | 4>(3);
+  const [inferSemanticHeadings, setInferSemanticHeadings] = useState<boolean>(false);
 
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [docTitle, setDocTitle] = useState("Mark-Down Document");
@@ -59,8 +60,8 @@ export default function HomePage() {
   const [statusText, setStatusText] = useState<string | null>(null);
 
   const { normalizedText, notes, stats } = useMemo(
-    () => normalizeInput(rawText),
-    [rawText],
+    () => normalizeInput(rawText, { inferSemanticHeadings }),
+    [rawText, inferSemanticHeadings],
   );
 
   const effectiveNormalized = normalizedOverride ?? normalizedText;
@@ -434,6 +435,8 @@ export default function HomePage() {
         setMarginPreset={setMarginPreset}
         tablePreset={tablePreset}
         setTablePreset={setTablePreset}
+        inferSemanticHeadings={inferSemanticHeadings}
+        setInferSemanticHeadings={setInferSemanticHeadings}
       />
 
       <SuggestionsPanel

@@ -189,6 +189,18 @@ export function extractDocIntelligence(params: {
         preview: textPreview(text),
       });
     }
+
+    if (
+      kind === "code" &&
+      (language === "ascii" || /^[+\-| ]{5,}/m.test(text))
+    ) {
+      diagrams.push({
+        index: diagrams.length + 1,
+        kind: "ascii",
+        title: null,
+        preview: textPreview(text),
+      });
+    }
   }
 
   // tables

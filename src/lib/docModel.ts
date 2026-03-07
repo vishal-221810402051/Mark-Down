@@ -1,3 +1,5 @@
+import type { DocIntelligence } from "./docIntelligence";
+
 export type DocHeading = {
   depth: 1 | 2 | 3 | 4 | 5 | 6;
   text: string;
@@ -7,6 +9,7 @@ export type DocHeading = {
 export type ParseResult = {
   html: string; // rendered HTML
   headings: DocHeading[];
+  intelligence: DocIntelligence;
 };
 
 export type DocState = {
@@ -14,6 +17,10 @@ export type DocState = {
   normalizedText: string;
   headings: DocHeading[];
   renderedPreview: string; // HTML (Phase 3+)
+};
+
+export type NormalizeOptions = {
+  inferSemanticHeadings?: boolean;
 };
 
 export type NormalizeStats = {

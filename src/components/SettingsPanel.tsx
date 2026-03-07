@@ -27,6 +27,9 @@ type Props = {
 
   tablePreset: TablePreset;
   setTablePreset: (v: TablePreset) => void;
+
+  inferSemanticHeadings: boolean;
+  setInferSemanticHeadings: (v: boolean) => void;
 };
 
 function GlassCard({ children }: { children: ReactNode }) {
@@ -53,6 +56,8 @@ export default function SettingsPanel(props: Props) {
     setMarginPreset,
     tablePreset,
     setTablePreset,
+    inferSemanticHeadings,
+    setInferSemanticHeadings,
   } = props;
 
   return (
@@ -206,6 +211,30 @@ export default function SettingsPanel(props: Props) {
                   <option value="wide-first">Wide first column</option>
                   <option value="wide-middle">Wide middle column</option>
                 </select>
+              </div>
+            </GlassCard>
+
+            <GlassCard>
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-xs font-semibold text-white/80">
+                    Infer semantic headings
+                  </div>
+                  <div className="text-xs text-white/50">
+                    Detect headings from plain-text structured docs
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setInferSemanticHeadings(!inferSemanticHeadings)}
+                  className={`rounded-xl border px-3 py-1.5 text-xs transition ${
+                    inferSemanticHeadings
+                      ? "border-white/20 bg-white/15 text-white"
+                      : "border-white/10 bg-white/5 text-white/70"
+                  }`}
+                >
+                  {inferSemanticHeadings ? "On" : "Off"}
+                </button>
               </div>
             </GlassCard>
 

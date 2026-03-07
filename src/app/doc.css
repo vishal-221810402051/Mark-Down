@@ -85,7 +85,16 @@
 }
 
 .doc pre.ascii-diagram {
-  background: #0f172a;
+  background: transparent;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 12px;
+  padding: 14px;
+  margin: 14px 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  line-height: 1.4;
+  overflow-x: auto;
+  white-space: pre;
 }
 
 /* Shiki / rehype-pretty-code */

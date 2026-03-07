@@ -216,6 +216,11 @@ function looksAsciiDiagram(line: string): boolean {
   return /^[+|\- ]{5,}/.test(line);
 }
 
+function isAsciiLine(line: string): boolean {
+  const s = line.trim();
+  return /^[+\-| ]{3,}/.test(s) || /^\|/.test(s);
+}
+
 function isListLine(line: string): boolean {
   return /^\s*[-*+]\s+/.test(line) || /^\s*\d+\.\s+/.test(line);
 }
@@ -336,6 +341,14 @@ function nextNonBlankLine(lines: string[], start: number): string {
   return "";
 }
 
+function prevNonBlankLine(lines: string[], start: number): string {
+  for (let i = start; i >= 0; i--) {
+    const s = lines[i]?.trim() ?? "";
+    if (s) return lines[i] ?? "";
+  }
+  return "";
+}
+
 function isTitleCaseLike(line: string): boolean {
   const words = line.trim().split(/\s+/).filter(Boolean);
   if (words.length === 0) return false;
@@ -431,6 +444,8 @@ function shouldPromoteSemanticHeading(
   next: string,
   nextNonBlank: string,
 ): boolean {
+  if (/^\d+[.)]\s+/.test(line.trim())) return false;
+
   const sectionTitleLike = looksLikeSectionTitle(line);
   const semanticLike = isLikelySemanticHeadingLine(line) || sectionTitleLike;
   if (!semanticLike) return false;
@@ -612,11 +627,29 @@ export function normalizeInput(
       const nextNonBlank = nextNonBlankLine(lines, i + 1);
 
       if (isLikelyNumberedSectionTitle(line)) {
-        const body = line.trim().replace(/^\d+[.)]\s+/, "").trim();
-        out1.push(`## ${body}`);
-        notes.push(`Promoted numbered section title: ${body}`);
-        stats.headingsFixed++;
-        continue;
+        const s = line.trim();
+        const nextLine = nextNonBlank.trim();
+        const prevLine = prevNonBlankLine(lines, i - 1).trim();
+        const looksListItem = /^\d+[.)]\s+[a-z]/.test(s);
+        const followsNumberedItem = /^\d+[.)]\s+/.test(prevLine);
+        const followedByParagraphOrStructured =
+          nextLine === "" ||
+          /^\d+\.\d+\s+/.test(nextLine) ||
+          isLikelyTableLike(nextLine) ||
+          isFenceOpenLine(nextLine) !== null ||
+          isLikelyCommand(nextLine) ||
+          looksLikeCodeStart(nextLine) ||
+          looksLikeCodeLineGeneric(nextLine) ||
+          /^[A-Z]/.test(nextLine) ||
+          /^[^\w]*[A-Z]/.test(nextLine);
+
+        if (!looksListItem && !followsNumberedItem && followedByParagraphOrStructured) {
+          const body = s.replace(/^\d+[.)]\s+/, "").trim();
+          out1.push(`## ${body}`);
+          notes.push(`Promoted numbered section title: ${body}`);
+          stats.headingsFixed++;
+          continue;
+        }
       }
 
       if (!semanticTitleAssigned && i === 0 && isLikelySemanticHeadingLine(line)) {
@@ -1042,12 +1075,68 @@ export function normalizeInput(
     out3.push(line);
   }
 
+  // ASCII diagram grouping (robust version)
+  const outAscii: string[] = [];
+
+  for (let i = 0; i < out3.length; i++) {
+    const line = out3[i] ?? "";
+
+    const isAsciiStart = /^[+\-| ]{3,}/.test(line.trim()) || /^\|/.test(line.trim());
+    if (!isAsciiStart) {
+      outAscii.push(line);
+      continue;
+    }
+
+    const block: string[] = [line];
+    let j = i + 1;
+
+    while (j < out3.length) {
+      const nxt = out3[j] ?? "";
+      const trimmed = nxt.trim();
+
+      // allow blank lines inside ASCII diagram
+      if (trimmed === "") {
+        block.push(nxt);
+        j++;
+        continue;
+      }
+
+      // connector lines
+      if (/^[|v^]/i.test(trimmed)) {
+        block.push(nxt);
+        j++;
+        continue;
+      }
+
+      // ascii box lines
+      if (/^[+\-| ]{3,}/.test(trimmed)) {
+        block.push(nxt);
+        j++;
+        continue;
+      }
+
+      break;
+    }
+
+    if (block.length >= 3) {
+      outAscii.push("```ascii");
+      outAscii.push(...block);
+      outAscii.push("```");
+      outAscii.push("");
+      notes.push("Detected ASCII diagram and fenced as ```ascii");
+      i = j - 1;
+      continue;
+    }
+
+    outAscii.push(line);
+  }
+
   // 3.5) Table detection (outside fences) -> markdown tables.
   const outTables: string[] = [];
   let inFence4 = false;
 
-  for (let i = 0; i < out3.length; i++) {
-    const line = out3[i] ?? "";
+  for (let i = 0; i < outAscii.length; i++) {
+    const line = outAscii[i] ?? "";
 
     if (isFenceLine(line)) {
       inFence4 = !inFence4;
@@ -1067,8 +1156,8 @@ export function normalizeInput(
 
     const block: string[] = [];
     let j = i;
-    while (j < out3.length) {
-      const l = out3[j] ?? "";
+    while (j < outAscii.length) {
+      const l = outAscii[j] ?? "";
 
       if (l.trim() === "") break;
       if (isFenceLine(l)) break;
@@ -1123,7 +1212,7 @@ export function normalizeInput(
           for (let k = 1; k < block.length; k++) {
             const ln = block[k] ?? "";
             if (ln.trim() === "") break;
-            if (isSemanticBoundary(out3, i + k)) break;
+            if (isSemanticBoundary(outAscii, i + k)) break;
 
             const cols =
               mode === "spacing" ? splitColumnsBySpacing(ln) : splitColumnsByPipes(ln);

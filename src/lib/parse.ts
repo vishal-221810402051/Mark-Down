@@ -9,6 +9,8 @@ import { remark } from "remark";
 import { visit } from "unist-util-visit";
 import type { Blockquote, Paragraph, Root } from "mdast";
 import type { Parent } from "unist";
+import type { DocIntelligence } from "@/lib/docIntelligence";
+import { extractDocIntelligence } from "@/lib/docIntelligence";
 
 import type { DocHeading, ParseResult } from "./docModel";
 
@@ -375,5 +377,19 @@ export async function parseMarkdownToHtml(
     if (tocHtml) html = tocHtml + html;
   }
 
-  return { html, headings };
+  const intelligence: DocIntelligence = extractDocIntelligence({
+    html,
+    headings: headings.map((h) => ({
+      id: h.id,
+      text: h.text,
+      level: h.depth,
+    })),
+    normalizationNotes: [],
+  });
+
+  return {
+    html,
+    headings,
+    intelligence,
+  };
 }
