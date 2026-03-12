@@ -1,4 +1,4 @@
-import type { Suggestion, SuggestionPatch } from "./types";
+﻿import type { Suggestion, SuggestionPatch } from "./types";
 import { extractDocDiagnostics } from "@/lib/docDiagnostics";
 
 function uid(prefix: string) {
@@ -46,11 +46,11 @@ function fixNumberingBrackets(text: string) {
 }
 
 function hasBulletDots(text: string) {
-  return /^\s*[•–]\s+/m.test(text);
+  return /^\s*[â€¢â€“]\s+/m.test(text);
 }
 
 function fixBulletDots(text: string) {
-  return text.replace(/^\s*[•–]\s+/gm, "- ");
+  return text.replace(/^\s*[â€¢â€“]\s+/gm, "- ");
 }
 
 function likelyUnfencedCode(text: string) {
@@ -136,55 +136,82 @@ function shouldSuggestSemanticHeading(
   const s = line.trim();
   if (!s) return false;
 
-  // already a heading / list / fence / quote / table row
+  // already-structured content
   if (/^\s*#{1,6}\s+/.test(s)) return false;
   if (/^\s*(?:[-+*]|\d+\.)\s+/.test(s)) return false;
   if (/^\s*```/.test(s)) return false;
   if (/^\s*>/.test(s)) return false;
   if (/^\|.*\|$/.test(s)) return false;
 
-  // command/code-like
+  // command / shell / tooling starts
   if (
-    /^(npm|pnpm|yarn|docker|git|curl|wget|sqlite3|python|python3|pip|pip3|streamlit|mkdir|cd|touch|chmod|source|cp|mv|rm)\b/.test(
+    /^(npm|pnpm|yarn|docker|git|curl|wget|sqlite3|python|python3|pip|pip3|streamlit|mkdir|cd|touch|chmod|source|cp|mv|rm|sudo|htop|vcgencmd|\.quit|\.mode|\.import)\b/i.test(
       s,
     )
   ) {
     return false;
   }
 
-  // flow / ascii connectors
-  if (/^[│|v^]+$/.test(s)) return false;
+  // SQL / DDL / query-ish lines
+  if (
+    /^(CREATE|ALTER|DROP|INSERT|UPDATE|DELETE|SELECT|WITH|PRAGMA)\b/i.test(s)
+  ) {
+    return false;
+  }
+
+  // connector / flow / ascii-only lines
+  if (/^[│|v^]+$/i.test(s)) return false;
   if (/^[+\-]{3,}$/.test(s)) return false;
 
-  // step labels followed by command/setup lines are not headings
+  // explanatory labels that should never become headings
   if (
-    /^[A-Z][A-Za-z ]+$/.test(s) &&
-    /^(sudo|pip|python|docker|npm|mkdir|cd|touch|chmod|sqlite3)\b/i.test(
+    /^(Expected output|Outputs?|Use|Resulting structure|Prompt should change to|Example import|Example usage|Inside SQLite shell|Exit SQLite|Verify database|Run application|Access UI|Create database file|Create script|Create application file|Create startup script|Make executable|Backup database|Monitor CPU temperature|Check system load)\s*:?\s*$/i.test(
+      s,
+    )
+  ) {
+    return false;
+  }
+
+  // setup/action labels that are usually steps, not sections
+  if (
+    /^(Update|Install|Create|Activate|Run|Save|Load|Verify|Access|Make|Backup|Monitor|Check|Exit)\b/i.test(
+      s,
+    )
+  ) {
+    return false;
+  }
+
+  // if followed by a command/code-like line, treat as step label not heading
+  if (
+    /^(npm|pnpm|yarn|docker|git|curl|wget|sqlite3|python|python3|pip|pip3|streamlit|mkdir|cd|touch|chmod|source|cp|mv|rm|sudo|htop|vcgencmd|\.quit|\.mode|\.import)\b/i.test(
       nextNonBlank,
     )
   ) {
     return false;
   }
 
-  // flow container labels followed by connector context are not headings
-  if (/flow/i.test(s) && /^[│|v^]/.test(nextNonBlank)) return false;
-
-  // avoid promoting nodes inside textual flow diagrams
-  if (/^[│|v^]+$/.test(prevNonBlank) || /^[│|v^]+$/.test(nextNonBlank)) {
+  // if followed by SQL, also not a heading
+  if (/^(CREATE|ALTER|DROP|INSERT|UPDATE|DELETE|SELECT|WITH|PRAGMA)\b/i.test(nextNonBlank)) {
     return false;
   }
 
-  // likely explanatory labels, not headings
-  if (/^(expected output|outputs?|use|resulting structure|prompt should change to)$/i.test(s)) {
+  // flow container labels should not be promoted
+  if (/flow/i.test(s) && /^[│|v^]+$/i.test(nextNonBlank)) {
     return false;
   }
 
-  // keep this strict
-  if (!/^[A-Z][A-Za-z0-9&()\/+\-– ]{2,80}$/.test(s)) return false;
+  // acceptable heading shape
+  if (!/^[A-Z][A-Za-z0-9&()\/+\-–'": ]{2,80}$/.test(s)) return false;
 
   return true;
 }
 
+function looksLikeRealSectionLabel(line: string): boolean {
+  const s = line.trim();
+  return /^(Project Overview|Overview|Core Concept|Functional Workflow|Key Features|Hardware Platform|Hardware Cost Estimate|Software Architecture|Database Structure|Development Roadmap|System Alerts & Warnings|Project Objective|System Requirements|Database Schema|Research Roadmap|Estimated Timeline|Alerts & Warnings)$/i.test(
+    s,
+  );
+}
 export function generateSuggestions(
   rawText: string,
   normalizedText: string,
@@ -258,7 +285,7 @@ export function generateSuggestions(
   if (hasBulletDots(rawText)) {
     suggestions.push({
       id: uid("bullets_normalize"),
-      title: "Normalize bullets (•/– -> -)",
+      title: "Normalize bullets (â€¢/â€“ -> -)",
       rationale: "Ensures lists render correctly in Markdown and PDF.",
       patches: [patch("raw", fixBulletDots), patch("normalized", fixBulletDots)],
     });
@@ -380,7 +407,12 @@ export function generateSuggestions(
     const line = lines[i] ?? "";
     const prev = prevNonBlank(lines, i);
     const next = nextNonBlank(lines, i);
-    if (!shouldSuggestSemanticHeading(line, prev, next)) continue;
+    if (
+      !looksLikeRealSectionLabel(line) &&
+      !shouldSuggestSemanticHeading(line, prev, next)
+    ) {
+      continue;
+    }
 
     suggestions.push({
       id: `heading-${i}-${line.trim()}`,
@@ -415,4 +447,6 @@ export function generateSuggestions(
 
   return dedupeSuggestions(suggestions);
 }
+
+
 
