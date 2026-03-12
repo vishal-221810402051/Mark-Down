@@ -79,6 +79,55 @@ function fenceWholeDocAsCode(text: string) {
   return `\`\`\`text\n${text.replace(/\s+$/g, "")}\n\`\`\`\n`;
 }
 
+function dedupeSuggestions(suggestions: Suggestion[]): Suggestion[] {
+  const seen = new Set<string>();
+  const out: Suggestion[] = [];
+
+  for (const s of suggestions) {
+    const key = JSON.stringify({
+      title: s.title,
+      rationale: s.rationale,
+      patches: s.patches.map((p) => ({
+        target: p.target,
+        preview: p.apply.toString(),
+      })),
+    });
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(s);
+  }
+
+  return out;
+}
+
+function collectUnfencedCommandLines(text: string): string[] {
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  const out: string[] = [];
+  let inFence = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i] ?? "";
+    const line = raw.trim();
+
+    if (/^\s*```/.test(raw)) {
+      inFence = !inFence;
+      continue;
+    }
+
+    if (inFence || !line) continue;
+
+    if (
+      /^(npm|pnpm|yarn|docker|git|curl|wget|sqlite3|python|python3|pip|pip3|streamlit|mkdir|cd|touch|chmod|source|cp|mv|rm|sudo|htop|vcgencmd|\.quit|\.mode|\.import)\b/.test(
+        line,
+      )
+    ) {
+      out.push(raw);
+    }
+  }
+
+  return out;
+}
+
 function shouldSuggestSemanticHeading(
   line: string,
   prevNonBlank: string,
@@ -140,7 +189,7 @@ export function generateSuggestions(
   rawText: string,
   normalizedText: string,
 ): Suggestion[] {
-  const sug: Suggestion[] = [];
+  const suggestions: Suggestion[] = [];
   const diagnostics = extractDocDiagnostics({
     rawText,
     normalizedText,
@@ -159,8 +208,33 @@ export function generateSuggestions(
     intelligence: null,
   });
 
+  const unfencedCommands = collectUnfencedCommandLines(normalizedText);
+  if (unfencedCommands.length >= 2) {
+    suggestions.push({
+      id: `grouped-command-fence-${unfencedCommands.length}`,
+      title: `Wrap ${unfencedCommands.length} command lines as bash block`,
+      rationale:
+        "Several unfenced command lines were detected; grouping them as a bash block will improve formatting.",
+      patches: [
+        {
+          target: "normalized",
+          apply(text: string) {
+            let updated = text;
+            const block = `\`\`\`bash\n${unfencedCommands.map((l) => l.trim()).join("\n")}\n\`\`\``;
+            for (const cmd of unfencedCommands) {
+              const escaped = cmd.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+              updated = updated.replace(new RegExp(`^${escaped}\\s*$`, "m"), "");
+            }
+            updated = updated.replace(/\n{3,}/g, "\n\n").trimEnd();
+            return `${updated}\n\n${block}\n`;
+          },
+        },
+      ],
+    });
+  }
+
   if (hasTitleColonPattern(rawText)) {
-    sug.push({
+    suggestions.push({
       id: uid("title_to_h1"),
       title: 'Convert "Title:" into a proper H1',
       rationale:
@@ -173,7 +247,7 @@ export function generateSuggestions(
   }
 
   if (hasSectionColon(rawText)) {
-    sug.push({
+    suggestions.push({
       id: uid("section_to_headings"),
       title: 'Convert "Section:" / "Subsection:" to headings',
       rationale: "Improves hierarchy, TOC quality, and spacing.",
@@ -182,7 +256,7 @@ export function generateSuggestions(
   }
 
   if (hasBulletDots(rawText)) {
-    sug.push({
+    suggestions.push({
       id: uid("bullets_normalize"),
       title: "Normalize bullets (•/– -> -)",
       rationale: "Ensures lists render correctly in Markdown and PDF.",
@@ -191,7 +265,7 @@ export function generateSuggestions(
   }
 
   if (hasNumberingBrackets(rawText)) {
-    sug.push({
+    suggestions.push({
       id: uid("numbering_normalize"),
       title: "Normalize numbering (1) -> 1.)",
       rationale: "Prevents broken ordered lists.",
@@ -204,7 +278,7 @@ export function generateSuggestions(
 
   const fenceCount = countFences(rawText);
   if (fenceCount % 2 === 1) {
-    sug.push({
+    suggestions.push({
       id: uid("fence_autoclose"),
       title: "Close an unclosed code fence",
       rationale:
@@ -217,7 +291,7 @@ export function generateSuggestions(
   }
 
   if (likelyUnfencedCode(rawText)) {
-    sug.push({
+    suggestions.push({
       id: uid("unfenced_code_hint"),
       title: "Wrap detected code-like block in a fenced code block",
       rationale:
@@ -230,7 +304,7 @@ export function generateSuggestions(
   }
 
   if (normalizedText !== rawText) {
-    sug.push({
+    suggestions.push({
       id: uid("use_normalized"),
       title: "Use normalized output rules for cleaner formatting",
       rationale:
@@ -250,7 +324,7 @@ export function generateSuggestions(
     const cmd = (item.detail ?? "").trim();
     if (!cmd) continue;
 
-    sug.push({
+    suggestions.push({
       id: `cmd-fence-${uid("diag")}`,
       title: "Fence command block",
       rationale: "Command lines should be wrapped in a bash code block",
@@ -270,7 +344,7 @@ export function generateSuggestions(
     const line = (item.detail ?? "").trim();
     if (!line) continue;
 
-    sug.push({
+    suggestions.push({
       id: `callout-${uid("diag")}`,
       title: "Convert to callout block",
       rationale: "Plain callouts should use blockquote syntax",
@@ -308,7 +382,7 @@ export function generateSuggestions(
     const next = nextNonBlank(lines, i);
     if (!shouldSuggestSemanticHeading(line, prev, next)) continue;
 
-    sug.push({
+    suggestions.push({
       id: `heading-${i}-${line.trim()}`,
       title: "Promote semantic heading",
       rationale: "This line looks like a section heading",
@@ -324,7 +398,7 @@ export function generateSuggestions(
   }
 
   if (diagnostics.items.some((i) => i.kind === "table_ambiguity")) {
-    sug.push({
+    suggestions.push({
       id: "table-suggestion",
       title: "Convert pipe text to table",
       rationale: "Pipe-heavy text detected that may be a Markdown table",
@@ -339,5 +413,6 @@ export function generateSuggestions(
     });
   }
 
-  return sug;
+  return dedupeSuggestions(suggestions);
 }
+
