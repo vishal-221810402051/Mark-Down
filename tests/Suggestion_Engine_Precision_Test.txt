@@ -1,0 +1,157 @@
+# Suggestion Engine Precision Test
+
+A validation document for semantic heading suggestion quality.
+
+---
+
+## True Section
+
+This paragraph belongs to a real section.
+
+Project Overview
+
+This line is isolated and looks like a true semantic heading candidate.
+
+Key Features
+
+This is another true heading-like label.
+
+---
+
+## Setup Guide Example
+
+Update OS
+
+sudo apt update
+
+sudo apt upgrade -y
+
+Expected output:
+
+Python 3.11.x
+
+Install Dependencies
+
+pip install pandas numpy
+
+pip install networkx scipy
+
+Outputs:
+
+requirements.txt
+
+---
+
+## Textual Flow Example
+
+System Flow
+
+User Input
+
+|
+
+v
+
+Trait Resolution
+
+|
+
+v
+
+Candidate Gene Shortlisting
+
+|
+
+v
+
+Network Centrality Analysis
+
+|
+
+v
+
+Report Generation
+
+These flow node labels must not become heading suggestions.
+
+---
+
+## ASCII-like Example
+
++-------------------+
+
+| Data Input        |
+
++-------------------+
+
+        |
+
+        v
+
++-------------------+
+
+| Data Processing   |
+
++-------------------+
+
+These ASCII nodes must not become heading suggestions.
+
+---
+
+## Table Example
+
+| Stage | Description |
+
+| --- | --- |
+
+| Input | Receives user data |
+
+| Output | Generates report |
+
+Table rows must not become heading suggestions.
+
+---
+
+## Explanatory Labels
+
+Use:
+
+python app.py
+
+Resulting structure:
+
+app/
+
+reports/
+
+logs/
+
+Prompt should change to:
+
+(venv) user@machine:~/project $
+
+These lines must not become heading suggestions.
+
+---
+
+## More True Semantic Headings
+
+Hardware Platform
+
+This should remain a heading suggestion candidate.
+
+Software Architecture
+
+This should remain a heading suggestion candidate.
+
+Database Structure
+
+This should remain a heading suggestion candidate.
+
+Development Roadmap
+
+This should remain a heading suggestion candidate.
+
+Project Objective
+
+This should remain a heading suggestion candidate.

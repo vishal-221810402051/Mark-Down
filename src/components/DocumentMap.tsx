@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import type { ReactNode, RefObject } from "react";
 
 import type { DocDiagnostics } from "@/lib/docDiagnostics";
@@ -86,16 +86,12 @@ export default function DocumentMap({
   activeHeadingId,
 }: Props) {
   const sections = intelligence?.headings ?? [];
-  const codeBlocks = intelligence?.codeBlocks;
+  const codeBlocks = intelligence?.codeBlocks ?? [];
   const tables = intelligence?.tables ?? [];
   const diagrams = intelligence?.diagrams ?? [];
   const procedures = intelligence?.procedures ?? [];
   const roadmaps = intelligence?.roadmaps ?? [];
-  const commandBlocks = useMemo(
-    () => (codeBlocks ?? []).filter((b) => b.kind === "command"),
-    [codeBlocks],
-  );
-
+  const commandBlocks = codeBlocks.filter((b) => b.kind === "command");
   return (
     <aside className="h-full overflow-auto rounded-2xl border border-white/10 bg-black/25 p-3 backdrop-blur-2xl shadow-[0_18px_45px_rgba(0,0,0,0.35)]">
       <div className="mb-3">
@@ -106,8 +102,7 @@ export default function DocumentMap({
             · {intelligence.stats.tables} tables · {intelligence.stats.diagrams} diagrams ·{" "}
             {intelligence.stats.procedures} procedures
           </div>
-        ) : null}
-      </div>
+        ) : null}      </div>
 
       {diagnostics && diagnostics.items.length > 0 ? (
         <div className="mb-3 rounded-2xl border border-white/10 bg-white/5 px-3 py-3">

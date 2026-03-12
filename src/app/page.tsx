@@ -364,7 +364,6 @@ export default function HomePage() {
                 Show normalized
               </label>
             </div>
-
             {!showNormalized && intelligence && !showDocMap ? (
               <div className="mx-3 mt-2 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-xs text-slate-200">
                 <div className="font-semibold text-white/90">Document Intelligence</div>

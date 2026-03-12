@@ -1,4 +1,5 @@
 import type { Suggestion, SuggestionPatch } from "./types";
+import { extractDocDiagnostics } from "@/lib/docDiagnostics";
 
 function uid(prefix: string) {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
@@ -78,11 +79,85 @@ function fenceWholeDocAsCode(text: string) {
   return `\`\`\`text\n${text.replace(/\s+$/g, "")}\n\`\`\`\n`;
 }
 
+function shouldSuggestSemanticHeading(
+  line: string,
+  prevNonBlank: string,
+  nextNonBlank: string,
+): boolean {
+  const s = line.trim();
+  if (!s) return false;
+
+  // already a heading / list / fence / quote / table row
+  if (/^\s*#{1,6}\s+/.test(s)) return false;
+  if (/^\s*(?:[-+*]|\d+\.)\s+/.test(s)) return false;
+  if (/^\s*```/.test(s)) return false;
+  if (/^\s*>/.test(s)) return false;
+  if (/^\|.*\|$/.test(s)) return false;
+
+  // command/code-like
+  if (
+    /^(npm|pnpm|yarn|docker|git|curl|wget|sqlite3|python|python3|pip|pip3|streamlit|mkdir|cd|touch|chmod|source|cp|mv|rm)\b/.test(
+      s,
+    )
+  ) {
+    return false;
+  }
+
+  // flow / ascii connectors
+  if (/^[│|v^]+$/.test(s)) return false;
+  if (/^[+\-]{3,}$/.test(s)) return false;
+
+  // step labels followed by command/setup lines are not headings
+  if (
+    /^[A-Z][A-Za-z ]+$/.test(s) &&
+    /^(sudo|pip|python|docker|npm|mkdir|cd|touch|chmod|sqlite3)\b/i.test(
+      nextNonBlank,
+    )
+  ) {
+    return false;
+  }
+
+  // flow container labels followed by connector context are not headings
+  if (/flow/i.test(s) && /^[│|v^]/.test(nextNonBlank)) return false;
+
+  // avoid promoting nodes inside textual flow diagrams
+  if (/^[│|v^]+$/.test(prevNonBlank) || /^[│|v^]+$/.test(nextNonBlank)) {
+    return false;
+  }
+
+  // likely explanatory labels, not headings
+  if (/^(expected output|outputs?|use|resulting structure|prompt should change to)$/i.test(s)) {
+    return false;
+  }
+
+  // keep this strict
+  if (!/^[A-Z][A-Za-z0-9&()\/+\-– ]{2,80}$/.test(s)) return false;
+
+  return true;
+}
+
 export function generateSuggestions(
   rawText: string,
   normalizedText: string,
 ): Suggestion[] {
   const sug: Suggestion[] = [];
+  const diagnostics = extractDocDiagnostics({
+    rawText,
+    normalizedText,
+    notes: [],
+    stats: {
+      fencesAutoClosed: 0,
+      headingsFixed: 0,
+      bulletsNormalized: 0,
+      numberingNormalized: 0,
+      commandBlocksCreated: 0,
+      mermaidBlocksCreated: 0,
+      tablesConverted: 0,
+    },
+    renderedHtml: "",
+    headings: [],
+    intelligence: null,
+  });
 
   if (hasTitleColonPattern(rawText)) {
     sug.push({
@@ -165,6 +240,101 @@ export function generateSuggestions(
           void text;
           return normalizedText;
         }),
+      ],
+    });
+  }
+
+  // Phase 16B: diagnostics-driven suggestions
+  for (const item of diagnostics.items) {
+    if (item.kind !== "unfenced_command_candidate") continue;
+    const cmd = (item.detail ?? "").trim();
+    if (!cmd) continue;
+
+    sug.push({
+      id: `cmd-fence-${uid("diag")}`,
+      title: "Fence command block",
+      rationale: "Command lines should be wrapped in a bash code block",
+      patches: [
+        {
+          target: "normalized",
+          apply(text: string) {
+            return text.replace(cmd, `\`\`\`bash\n${cmd}\n\`\`\``);
+          },
+        },
+      ],
+    });
+  }
+
+  for (const item of diagnostics.items) {
+    if (item.kind !== "plain_callout_candidate") continue;
+    const line = (item.detail ?? "").trim();
+    if (!line) continue;
+
+    sug.push({
+      id: `callout-${uid("diag")}`,
+      title: "Convert to callout block",
+      rationale: "Plain callouts should use blockquote syntax",
+      patches: [
+        {
+          target: "normalized",
+          apply(text: string) {
+            return text.replace(line, `> ${line}`);
+          },
+        },
+      ],
+    });
+  }
+
+  const lines = normalizedText.replace(/\r\n/g, "\n").split("\n");
+  function prevNonBlank(linesInput: string[], i: number): string {
+    for (let j = i - 1; j >= 0; j--) {
+      const s = linesInput[j]?.trim() ?? "";
+      if (s) return s;
+    }
+    return "";
+  }
+
+  function nextNonBlank(linesInput: string[], i: number): string {
+    for (let j = i + 1; j < linesInput.length; j++) {
+      const s = linesInput[j]?.trim() ?? "";
+      if (s) return s;
+    }
+    return "";
+  }
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] ?? "";
+    const prev = prevNonBlank(lines, i);
+    const next = nextNonBlank(lines, i);
+    if (!shouldSuggestSemanticHeading(line, prev, next)) continue;
+
+    sug.push({
+      id: `heading-${i}-${line.trim()}`,
+      title: "Promote semantic heading",
+      rationale: "This line looks like a section heading",
+      patches: [
+        {
+          target: "normalized",
+          apply(text: string) {
+            return text.replace(line, `## ${line.trim()}`);
+          },
+        },
+      ],
+    });
+  }
+
+  if (diagnostics.items.some((i) => i.kind === "table_ambiguity")) {
+    sug.push({
+      id: "table-suggestion",
+      title: "Convert pipe text to table",
+      rationale: "Pipe-heavy text detected that may be a Markdown table",
+      patches: [
+        {
+          target: "normalized",
+          apply(text: string) {
+            return text;
+          },
+        },
       ],
     });
   }
