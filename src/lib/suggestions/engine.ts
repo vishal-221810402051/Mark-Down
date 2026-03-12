@@ -75,6 +75,30 @@ function likelyUnfencedCode(text: string) {
   return false;
 }
 
+function looksLikeStructuredDocument(text: string): boolean {
+  const t = text.replace(/\r\n/g, "\n");
+
+  const headingishCount =
+    (t.match(/^(?:#{1,6}\s+.+|[A-Z][A-Za-z0-9&()\/+\-–'": ]{3,80})$/gm) ?? []).length;
+
+  const phaseCount =
+    (t.match(/^\s*(?:Phase \d+|Step \d+|Section \d+|Deliverables|Acceptance checks)\b/gm) ??
+      []).length;
+
+  const paragraphCount =
+    t.split(/\n\s*\n/).filter((p) => p.trim().length > 40).length;
+
+  const diagramHints =
+    (t.match(/\b(flowchart|graph\s+(?:TD|LR)|sequenceDiagram)\b|-->/g) ?? []).length;
+
+  return (
+    headingishCount >= 4 ||
+    phaseCount >= 3 ||
+    paragraphCount >= 4 ||
+    diagramHints >= 2
+  );
+}
+
 function fenceWholeDocAsCode(text: string) {
   return `\`\`\`text\n${text.replace(/\s+$/g, "")}\n\`\`\`\n`;
 }
@@ -212,6 +236,67 @@ function looksLikeRealSectionLabel(line: string): boolean {
     s,
   );
 }
+
+function getSuggestionPriority(s: Suggestion): number {
+  const title = s.title.toLowerCase();
+  const rationale = s.rationale.toLowerCase();
+
+  if (title.startsWith("wrap ") && title.includes("command lines as bash block")) {
+    return 100;
+  }
+
+  if (title === "fence command block") {
+    return 90;
+  }
+
+  if (title === "convert to callout block") {
+    return 80;
+  }
+
+  if (title === "promote semantic heading") {
+    return 70;
+  }
+
+  if (title === "use normalized output rules for cleaner formatting") {
+    return 60;
+  }
+
+  if (title === "convert pipe text to table") {
+    return 50;
+  }
+
+  if (title.includes("convert") && title.includes("h1")) {
+    return 40;
+  }
+
+  if (title.includes("heading")) {
+    return 35;
+  }
+
+  if (title.includes("bullet") || title.includes("numbering")) {
+    return 30;
+  }
+
+  if (title.includes("code fence") || rationale.includes("fence")) {
+    return 25;
+  }
+
+  return 10;
+}
+
+function sortSuggestions(suggestions: Suggestion[]): Suggestion[] {
+  return suggestions
+    .map((s, index) => ({
+      s,
+      index,
+      priority: getSuggestionPriority(s),
+    }))
+    .sort((a, b) => {
+      if (b.priority !== a.priority) return b.priority - a.priority;
+      return a.index - b.index;
+    })
+    .map((x) => x.s);
+}
 export function generateSuggestions(
   rawText: string,
   normalizedText: string,
@@ -317,7 +402,7 @@ export function generateSuggestions(
     });
   }
 
-  if (likelyUnfencedCode(rawText)) {
+  if (likelyUnfencedCode(rawText) && !looksLikeStructuredDocument(rawText)) {
     suggestions.push({
       id: uid("unfenced_code_hint"),
       title: "Wrap detected code-like block in a fenced code block",
@@ -445,7 +530,7 @@ export function generateSuggestions(
     });
   }
 
-  return dedupeSuggestions(suggestions);
+  return sortSuggestions(dedupeSuggestions(suggestions));
 }
 
 
