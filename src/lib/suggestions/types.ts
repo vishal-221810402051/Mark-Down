@@ -10,4 +10,5 @@ export type Suggestion = {
   title: string;
   rationale: string;
   patches: SuggestionPatch[];
+  confidence?: number;
 };

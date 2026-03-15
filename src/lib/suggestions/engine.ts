@@ -304,13 +304,49 @@ function getSuggestionContext(text: string) {
   };
 }
 
+type ContextType = {
+  isRoadmapLike: boolean;
+  isSetupLike: boolean;
+  isStructuredSpecLike: boolean;
+};
+
+function computeSuggestionConfidence(s: Suggestion): number {
+  const title = s.title.toLowerCase();
+
+  if (title.startsWith("wrap ") && title.includes("command")) {
+    return 0.97;
+  }
+
+  if (title === "fence command block") {
+    return 0.95;
+  }
+
+  if (title === "convert to callout block") {
+    return 0.91;
+  }
+
+  if (title === "promote semantic heading") {
+    return 0.75;
+  }
+
+  if (title.includes("normalize numbering")) {
+    return 0.88;
+  }
+
+  if (title.includes("bullet")) {
+    return 0.85;
+  }
+
+  if (title.includes("code fence")) {
+    return 0.83;
+  }
+
+  return 0.6;
+}
+
 function getSuggestionPriority(
   s: Suggestion,
-  context?: {
-    isRoadmapLike: boolean;
-    isSetupLike: boolean;
-    isStructuredSpecLike: boolean;
-  },
+  context?: ContextType,
 ): number {
   const title = s.title.toLowerCase();
   const rationale = s.rationale.toLowerCase();
@@ -331,6 +367,10 @@ function getSuggestionPriority(
 
   if (context?.isRoadmapLike && title === "convert to callout block") {
     return 85;
+  }
+
+  if (s.confidence !== undefined) {
+    return Math.round(s.confidence * 100);
   }
 
   if (title === "convert to callout block") {
@@ -370,11 +410,7 @@ function getSuggestionPriority(
 
 function sortSuggestions(
   suggestions: Suggestion[],
-  context?: {
-    isRoadmapLike: boolean;
-    isSetupLike: boolean;
-    isStructuredSpecLike: boolean;
-  },
+  context?: ContextType,
 ): Suggestion[] {
   return suggestions
     .map((s, index) => ({
@@ -406,11 +442,7 @@ function isNoOpSuggestion(s: Suggestion, normalizedText: string): boolean {
 function suppressSuggestions(
   suggestions: Suggestion[],
   normalizedText: string,
-  context?: {
-    isRoadmapLike: boolean;
-    isSetupLike: boolean;
-    isStructuredSpecLike: boolean;
-  },
+  context?: ContextType,
 ): Suggestion[] {
   const out: Suggestion[] = [];
 
@@ -743,9 +775,13 @@ export function generateSuggestions(
 
   const context = getSuggestionContext(rawText);
   const deduped = dedupeSuggestions(suggestions);
+
+  // annotate confidence
+  for (const s of deduped) {
+    s.confidence = computeSuggestionConfidence(s);
+  }
+
   const suppressed = suppressSuggestions(deduped, normalizedText, context);
   return sortSuggestions(suppressed, context);
 }
-
-
 

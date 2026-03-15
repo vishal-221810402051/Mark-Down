@@ -153,7 +153,14 @@ export default function SuggestionsPanel(props: Props) {
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div>
-                        <div className="text-sm font-semibold text-white">{s.title}</div>
+                        <div className="flex items-center gap-2">
+                          <div className="text-sm font-semibold text-white">{s.title}</div>
+                          {s.confidence !== undefined ? (
+                            <span className="rounded-full border border-white/20 bg-white/10 px-2 py-0.5 text-xs text-white/85">
+                              {(s.confidence * 100).toFixed(0)}%
+                            </span>
+                          ) : null}
+                        </div>
                         <div className="mt-1 text-xs text-white/60">{s.rationale}</div>
                       </div>
 
