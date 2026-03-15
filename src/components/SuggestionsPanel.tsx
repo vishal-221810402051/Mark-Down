@@ -3,6 +3,7 @@
 import { useState } from "react";
 import DiffViewer from "@/components/DiffViewer";
 import { makeLineDiff } from "@/lib/suggestions/diff";
+import { computePreview } from "@/lib/suggestions/preview";
 import type { Suggestion } from "@/lib/suggestions/types";
 
 type Props = {
@@ -127,6 +128,15 @@ export default function SuggestionsPanel(props: Props) {
                 const show = expandedId === s.id;
                 const rawPatch = s.patches.find((p) => p.target === "raw");
                 const normPatch = s.patches.find((p) => p.target === "normalized");
+                const rawApplied = rawPatch ? rawPatch.apply(rawText) === rawText : false;
+                const outputApplied = normPatch
+                  ? normPatch.apply(normalizedText) === normalizedText
+                  : false;
+                const previewPatch = rawPatch ?? normPatch;
+                const previewBaseText = rawPatch ? rawText : normalizedText;
+                const preview = previewPatch
+                  ? computePreview(previewBaseText, previewPatch.apply)
+                  : { before: "", after: "" };
                 const diffs = show
                   ? {
                       raw: rawPatch ? makeLineDiff(rawText, rawPatch.apply(rawText)) : null,
@@ -155,20 +165,48 @@ export default function SuggestionsPanel(props: Props) {
                       </button>
                     </div>
 
+                    {previewPatch ? (
+                      <div className="mt-3 space-y-2">
+                        <div className="text-[11px] font-semibold uppercase tracking-wide text-white/70">
+                          Before
+                        </div>
+                        <div className="rounded border border-red-500 bg-red-950/40 p-2 font-mono text-xs text-red-100">
+                          {preview.before || <span className="text-white/50">(no change)</span>}
+                        </div>
+
+                        <div className="text-[11px] font-semibold uppercase tracking-wide text-white/70">
+                          After
+                        </div>
+                        <div className="rounded border border-emerald-500 bg-emerald-950/40 p-2 font-mono text-xs text-emerald-100">
+                          {preview.after || <span className="text-white/50">(no change)</span>}
+                        </div>
+                      </div>
+                    ) : null}
+
                     <div className="mt-3 grid grid-cols-2 gap-2">
                       <button
                         onClick={() => onApplyRaw(s)}
-                        disabled={!rawPatch}
-                        className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/80 transition hover:bg-white/10 hover:text-white disabled:opacity-40 disabled:hover:bg-white/5"
+                        disabled={!rawPatch || rawApplied}
+                        className={[
+                          "rounded-xl px-3 py-2 text-xs transition disabled:opacity-40",
+                          rawApplied
+                            ? "border border-emerald-400/60 bg-emerald-500/20 text-emerald-200"
+                            : "border border-white/10 bg-white/5 text-white/80 hover:bg-white/10 hover:text-white disabled:hover:bg-white/5",
+                        ].join(" ")}
                       >
-                        Apply to Editor
+                        {rawApplied ? "Applied" : "Apply to Editor"}
                       </button>
                       <button
                         onClick={() => onApplyNormalized(s)}
-                        disabled={!normPatch}
-                        className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/80 transition hover:bg-white/10 hover:text-white disabled:opacity-40 disabled:hover:bg-white/5"
+                        disabled={!normPatch || outputApplied}
+                        className={[
+                          "rounded-xl px-3 py-2 text-xs transition disabled:opacity-40",
+                          outputApplied
+                            ? "border border-emerald-400/60 bg-emerald-500/20 text-emerald-200"
+                            : "border border-white/10 bg-white/5 text-white/80 hover:bg-white/10 hover:text-white disabled:hover:bg-white/5",
+                        ].join(" ")}
                       >
-                        Apply to Output
+                        {outputApplied ? "Applied" : "Apply to Output"}
                       </button>
                     </div>
 

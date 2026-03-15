@@ -12,6 +12,10 @@ function patch(
   return { target, apply };
 }
 
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function countFences(text: string) {
   return (text.match(/^\s*```/gm) ?? []).length;
 }
@@ -446,10 +450,14 @@ export function generateSuggestions(
         {
           target: "normalized",
           apply(text: string) {
+            if (text.includes("```bash")) {
+              return text;
+            }
+
             let updated = text;
             const block = `\`\`\`bash\n${unfencedCommands.map((l) => l.trim()).join("\n")}\n\`\`\``;
             for (const cmd of unfencedCommands) {
-              const escaped = cmd.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+              const escaped = escapeRegex(cmd);
               updated = updated.replace(new RegExp(`^${escaped}\\s*$`, "m"), "");
             }
             updated = updated.replace(/\n{3,}/g, "\n\n").trimEnd();
@@ -559,7 +567,14 @@ export function generateSuggestions(
         {
           target: "normalized",
           apply(text: string) {
-            return text.replace(cmd, `\`\`\`bash\n${cmd}\n\`\`\``);
+            if (/```(bash|powershell|sh)/i.test(text)) {
+              return text;
+            }
+
+            return text.replace(
+              new RegExp(`^${escapeRegex(cmd)}$`, "m"),
+              `\`\`\`bash\n${cmd}\n\`\`\``,
+            );
           },
         },
       ],
@@ -579,7 +594,14 @@ export function generateSuggestions(
         {
           target: "normalized",
           apply(text: string) {
-            return text.replace(line, `> ${line}`);
+            if (/^\s*>/.test(line)) {
+              return text;
+            }
+
+            return text.replace(
+              new RegExp(`^${escapeRegex(line)}$`, "m"),
+              `> ${line}`,
+            );
           },
         },
       ],
@@ -650,7 +672,14 @@ export function generateSuggestions(
         {
           target: "normalized",
           apply(text: string) {
-            return text.replace(line, `## ${trimmed}`);
+            if (/^\s*#{1,6}\s+/.test(line)) {
+              return text;
+            }
+
+            return text.replace(
+              new RegExp(`^${escapeRegex(line)}$`, "m"),
+              `## ${trimmed}`,
+            );
           },
         },
       ],
