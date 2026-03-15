@@ -6,6 +6,38 @@ import { makeLineDiff } from "@/lib/suggestions/diff";
 import { computePreview } from "@/lib/suggestions/preview";
 import type { Suggestion } from "@/lib/suggestions/types";
 
+function getSuggestionGroup(title: string): string {
+  const t = title.toLowerCase();
+
+  if (
+    t.includes("command") ||
+    t.includes("bash") ||
+    t.includes("code") ||
+    t.includes("fence")
+  ) {
+    return "Code / Commands";
+  }
+
+  if (
+    t.includes("callout") ||
+    t.includes("heading") ||
+    t.includes("title") ||
+    t.includes("section")
+  ) {
+    return "Structure";
+  }
+
+  if (
+    t.includes("number") ||
+    t.includes("bullet") ||
+    t.includes("format")
+  ) {
+    return "Formatting";
+  }
+
+  return "Other";
+}
+
 type Props = {
   open: boolean;
   onClose: () => void;
@@ -40,6 +72,15 @@ export default function SuggestionsPanel(props: Props) {
   } = props;
 
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const groupedSuggestions = suggestions.reduce(
+    (acc, s) => {
+      const group = getSuggestionGroup(s.title);
+      if (!acc[group]) acc[group] = [];
+      acc[group].push(s);
+      return acc;
+    },
+    {} as Record<string, Suggestion[]>,
+  );
 
   return (
     <>
@@ -124,123 +165,133 @@ export default function SuggestionsPanel(props: Props) {
                 No suggestions right now.
               </div>
             ) : (
-              suggestions.map((s) => {
-                const show = expandedId === s.id;
-                const rawPatch = s.patches.find((p) => p.target === "raw");
-                const normPatch = s.patches.find((p) => p.target === "normalized");
-                const rawApplied = rawPatch ? rawPatch.apply(rawText) === rawText : false;
-                const outputApplied = normPatch
-                  ? normPatch.apply(normalizedText) === normalizedText
-                  : false;
-                const previewPatch = rawPatch ?? normPatch;
-                const previewBaseText = rawPatch ? rawText : normalizedText;
-                const preview = previewPatch
-                  ? computePreview(previewBaseText, previewPatch.apply)
-                  : { before: "", after: "" };
-                const diffs = show
-                  ? {
-                      raw: rawPatch ? makeLineDiff(rawText, rawPatch.apply(rawText)) : null,
-                      normalized: normPatch
-                        ? makeLineDiff(normalizedText, normPatch.apply(normalizedText))
-                        : null,
-                    }
-                  : null;
+              Object.entries(groupedSuggestions).map(([group, items]) => (
+                <div key={group} className="mb-6">
+                  <div className="mb-2 text-xs uppercase tracking-wider text-white/60">
+                    {group}
+                  </div>
 
-                return (
-                  <div
-                    key={s.id}
-                    className="rounded-2xl border border-white/10 bg-white/5 p-4 backdrop-blur-xl"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <div className="text-sm font-semibold text-white">{s.title}</div>
-                          {s.confidence !== undefined ? (
-                            <span className="rounded-full border border-white/20 bg-white/10 px-2 py-0.5 text-xs text-white/85">
-                              {(s.confidence * 100).toFixed(0)}%
-                            </span>
+                  <div className="space-y-3">
+                    {items.map((s) => {
+                      const show = expandedId === s.id;
+                      const rawPatch = s.patches.find((p) => p.target === "raw");
+                      const normPatch = s.patches.find((p) => p.target === "normalized");
+                      const rawApplied = rawPatch ? rawPatch.apply(rawText) === rawText : false;
+                      const outputApplied = normPatch
+                        ? normPatch.apply(normalizedText) === normalizedText
+                        : false;
+                      const previewPatch = rawPatch ?? normPatch;
+                      const previewBaseText = rawPatch ? rawText : normalizedText;
+                      const preview = previewPatch
+                        ? computePreview(previewBaseText, previewPatch.apply)
+                        : { before: "", after: "" };
+                      const diffs = show
+                        ? {
+                            raw: rawPatch ? makeLineDiff(rawText, rawPatch.apply(rawText)) : null,
+                            normalized: normPatch
+                              ? makeLineDiff(normalizedText, normPatch.apply(normalizedText))
+                              : null,
+                          }
+                        : null;
+
+                      return (
+                        <div
+                          key={s.id}
+                          className="rounded-2xl border border-white/10 bg-white/5 p-4 backdrop-blur-xl"
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <div className="text-sm font-semibold text-white">{s.title}</div>
+                                {s.confidence !== undefined ? (
+                                  <span className="rounded-full border border-white/20 bg-white/10 px-2 py-0.5 text-xs text-white/85">
+                                    {(s.confidence * 100).toFixed(0)}%
+                                  </span>
+                                ) : null}
+                              </div>
+                              <div className="mt-1 text-xs text-white/60">{s.rationale}</div>
+                            </div>
+
+                            <button
+                              onClick={() => setExpandedId(show ? null : s.id)}
+                              className="rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-white/80 transition hover:bg-white/10 hover:text-white"
+                            >
+                              {show ? "Hide diff" : "View diff"}
+                            </button>
+                          </div>
+
+                          {previewPatch ? (
+                            <div className="mt-3 space-y-2">
+                              <div className="text-[11px] font-semibold uppercase tracking-wide text-white/70">
+                                Before
+                              </div>
+                              <div className="rounded border border-red-500 bg-red-950/40 p-2 font-mono text-xs text-red-100">
+                                {preview.before || <span className="text-white/50">(no change)</span>}
+                              </div>
+
+                              <div className="text-[11px] font-semibold uppercase tracking-wide text-white/70">
+                                After
+                              </div>
+                              <div className="rounded border border-emerald-500 bg-emerald-950/40 p-2 font-mono text-xs text-emerald-100">
+                                {preview.after || <span className="text-white/50">(no change)</span>}
+                              </div>
+                            </div>
+                          ) : null}
+
+                          <div className="mt-3 grid grid-cols-2 gap-2">
+                            <button
+                              onClick={() => onApplyRaw(s)}
+                              disabled={!rawPatch || rawApplied}
+                              className={[
+                                "rounded-xl px-3 py-2 text-xs transition disabled:opacity-40",
+                                rawApplied
+                                  ? "border border-emerald-400/60 bg-emerald-500/20 text-emerald-200"
+                                  : "border border-white/10 bg-white/5 text-white/80 hover:bg-white/10 hover:text-white disabled:hover:bg-white/5",
+                              ].join(" ")}
+                            >
+                              {rawApplied ? "Applied" : "Apply to Editor"}
+                            </button>
+                            <button
+                              onClick={() => onApplyNormalized(s)}
+                              disabled={!normPatch || outputApplied}
+                              className={[
+                                "rounded-xl px-3 py-2 text-xs transition disabled:opacity-40",
+                                outputApplied
+                                  ? "border border-emerald-400/60 bg-emerald-500/20 text-emerald-200"
+                                  : "border border-white/10 bg-white/5 text-white/80 hover:bg-white/10 hover:text-white disabled:hover:bg-white/5",
+                              ].join(" ")}
+                            >
+                              {outputApplied ? "Applied" : "Apply to Output"}
+                            </button>
+                          </div>
+
+                          {show ? (
+                            <div className="mt-4 space-y-3">
+                              {diffs?.raw ? (
+                                <>
+                                  <div className="text-xs font-semibold text-white/80">
+                                    Editor diff
+                                  </div>
+                                  <DiffViewer lines={diffs.raw} />
+                                </>
+                              ) : null}
+
+                              {diffs?.normalized ? (
+                                <>
+                                  <div className="text-xs font-semibold text-white/80">
+                                    Output diff
+                                  </div>
+                                  <DiffViewer lines={diffs.normalized} />
+                                </>
+                              ) : null}
+                            </div>
                           ) : null}
                         </div>
-                        <div className="mt-1 text-xs text-white/60">{s.rationale}</div>
-                      </div>
-
-                      <button
-                        onClick={() => setExpandedId(show ? null : s.id)}
-                        className="rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-white/80 transition hover:bg-white/10 hover:text-white"
-                      >
-                        {show ? "Hide diff" : "View diff"}
-                      </button>
-                    </div>
-
-                    {previewPatch ? (
-                      <div className="mt-3 space-y-2">
-                        <div className="text-[11px] font-semibold uppercase tracking-wide text-white/70">
-                          Before
-                        </div>
-                        <div className="rounded border border-red-500 bg-red-950/40 p-2 font-mono text-xs text-red-100">
-                          {preview.before || <span className="text-white/50">(no change)</span>}
-                        </div>
-
-                        <div className="text-[11px] font-semibold uppercase tracking-wide text-white/70">
-                          After
-                        </div>
-                        <div className="rounded border border-emerald-500 bg-emerald-950/40 p-2 font-mono text-xs text-emerald-100">
-                          {preview.after || <span className="text-white/50">(no change)</span>}
-                        </div>
-                      </div>
-                    ) : null}
-
-                    <div className="mt-3 grid grid-cols-2 gap-2">
-                      <button
-                        onClick={() => onApplyRaw(s)}
-                        disabled={!rawPatch || rawApplied}
-                        className={[
-                          "rounded-xl px-3 py-2 text-xs transition disabled:opacity-40",
-                          rawApplied
-                            ? "border border-emerald-400/60 bg-emerald-500/20 text-emerald-200"
-                            : "border border-white/10 bg-white/5 text-white/80 hover:bg-white/10 hover:text-white disabled:hover:bg-white/5",
-                        ].join(" ")}
-                      >
-                        {rawApplied ? "Applied" : "Apply to Editor"}
-                      </button>
-                      <button
-                        onClick={() => onApplyNormalized(s)}
-                        disabled={!normPatch || outputApplied}
-                        className={[
-                          "rounded-xl px-3 py-2 text-xs transition disabled:opacity-40",
-                          outputApplied
-                            ? "border border-emerald-400/60 bg-emerald-500/20 text-emerald-200"
-                            : "border border-white/10 bg-white/5 text-white/80 hover:bg-white/10 hover:text-white disabled:hover:bg-white/5",
-                        ].join(" ")}
-                      >
-                        {outputApplied ? "Applied" : "Apply to Output"}
-                      </button>
-                    </div>
-
-                    {show ? (
-                      <div className="mt-4 space-y-3">
-                        {diffs?.raw ? (
-                          <>
-                            <div className="text-xs font-semibold text-white/80">
-                              Editor diff
-                            </div>
-                            <DiffViewer lines={diffs.raw} />
-                          </>
-                        ) : null}
-
-                        {diffs?.normalized ? (
-                          <>
-                            <div className="text-xs font-semibold text-white/80">
-                              Output diff
-                            </div>
-                            <DiffViewer lines={diffs.normalized} />
-                          </>
-                        ) : null}
-                      </div>
-                    ) : null}
+                      );
+                    })}
                   </div>
-                );
-              })
+                </div>
+              ))
             )}
           </div>
         </div>
