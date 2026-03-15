@@ -1,0 +1,253 @@
+# MARK-DOWN ENGINE VALIDATION DOCUMENT
+
+This document is intentionally mixed with different structural patterns to test the
+
+document intelligence, normalization, diagnostics, and suggestion engine.
+
+---
+
+## Overview
+
+The system should correctly identify:
+
+- headings
+
+- commands
+
+- diagrams
+
+- tables
+
+- procedures
+
+- callouts
+
+- roadmap phases
+
+It should **NOT** incorrectly classify normal sentences as headings.
+
+---
+
+## Example Setup Guide Section
+
+Install dependencies
+
+pip install pandas numpy
+
+pip install networkx scipy
+
+Create project folder
+
+mkdir helixa-pro
+
+cd helixa-pro
+
+Run application
+
+python app.py
+
+Expected output:
+
+Server started at http://localhost:8501
+
+---
+
+## Database Schema Example
+
+CREATE TABLE datasets (
+
+    id INTEGER PRIMARY KEY,
+
+    name TEXT,
+
+    created_at TEXT
+
+);
+
+CREATE TABLE experiments (
+
+    id INTEGER PRIMARY KEY,
+
+    dataset_id INTEGER,
+
+    score REAL
+
+);
+
+SELECT * FROM datasets;
+
+---
+
+## Example Table
+
+| Component | Quantity | Purpose |
+
+|-----------|----------|---------|
+
+| Raspberry Pi 5 | 1 | Main processing unit |
+
+| NVMe SSD | 1 | Data storage |
+
+| DS18B20 sensor | 1 | Temperature monitoring |
+
+| Camera module | 1 | Image capture |
+
+---
+
+## Roadmap
+
+Phase 0: Hardware Setup  
+
+Phase 1: OS Installation  
+
+Phase 2: Data Pipeline  
+
+Phase 3: Intelligence Engine  
+
+Phase 4: Optimizer System  
+
+Phase 5: UI Integration  
+
+Deliverables
+
+- Working prototype
+
+- Hardware monitoring
+
+- Dataset pipeline
+
+Acceptance checks
+
+- System boots
+
+- Data loads correctly
+
+- Predictions generated
+
+---
+
+## ASCII Diagram
+
++----------------------+
+
+|    Data Collection   |
+
++----------------------+
+
+           |
+
+           v
+
++----------------------+
+
+|   Data Processing    |
+
++----------------------+
+
+           |
+
+           v
+
++----------------------+
+
+|   Intelligence Core  |
+
++----------------------+
+
+---
+
+## Mermaid Diagram
+
+flowchart TD
+
+    A[User Input] --> B[Normalization]
+
+    B --> C[Parsing]
+
+    C --> D[Intelligence]
+
+    D --> E[Diagnostics]
+
+    E --> F[Suggestions]
+
+---
+
+## Example Callouts
+
+Note: This system is designed for extensibility.
+
+Warning: Running the optimizer with very large documents may take longer.
+
+Tip: Use Docker for consistent runtime environments.
+
+Alert: Ensure SSD storage is properly mounted before running experiments.
+
+---
+
+## Procedures
+
+### Step 1
+
+Download the repository.
+
+### Step 2
+
+Install dependencies.
+
+### Step 3
+
+Run the server.
+
+---
+
+## Potential False Heading Candidates
+
+Update OS
+
+Install Dependencies
+
+Backup database
+
+Monitor CPU temperature
+
+Check system load
+
+These should **NOT** become headings.
+
+---
+
+## True Semantic Headings
+
+Project Overview
+
+Hardware Platform
+
+Software Architecture
+
+Database Structure
+
+Development Roadmap
+
+Project Objective
+
+---
+
+## Final Notes
+
+This document intentionally mixes:
+
+- roadmap content
+
+- setup instructions
+
+- diagrams
+
+- SQL
+
+- tables
+
+- headings
+
+- callouts
+
+to stress-test the document intelligence pipeline.

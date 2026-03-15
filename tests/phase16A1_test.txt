@@ -1,0 +1,137 @@
+# PHASE PROMOTION VALIDATION DOCUMENT
+
+This document verifies the roadmap phase promotion rule.
+
+The rule should behave as follows:
+
+- If phases appear as a simple list → keep them as plain text
+- If a phase has its own content block → promote it to a heading
+
+---
+
+## Case 1 — Phase list (should NOT become headings)
+
+Phase 0: Environment Setup
+Phase 1: Core Pipeline
+Phase 2: Diagnostics
+Phase 3: Suggestion Engine
+Phase 4: UI Refinement
+
+These are only a roadmap overview.
+
+None of them should become headings.
+
+---
+
+## Case 2 — Phase sections (should become headings)
+
+Phase 0: Hardware Setup
+
+Install dependencies
+
+pip install pandas numpy
+pip install networkx scipy
+
+Create project folder
+
+mkdir app
+cd app
+
+Run application
+
+python app.py
+
+Expected output:
+
+Application started successfully.
+
+---
+
+Phase 1: Database Setup
+
+CREATE TABLE users (
+    id INTEGER PRIMARY KEY,
+    email TEXT,
+    created_at TEXT
+);
+
+CREATE TABLE sessions (
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER,
+    token TEXT
+);
+
+SELECT * FROM users;
+
+---
+
+Phase 2: Diagnostics Engine
+
+The diagnostics system should analyze documents and identify:
+
+- heading structure
+- code blocks
+- diagrams
+- tables
+- callouts
+
+---
+
+## Case 3 — Phase with diagrams
+
+Phase 3: Document Flow
+
++----------------------+
+|    User Input        |
++----------------------+
+           |
+           v
++----------------------+
+|   Normalization      |
++----------------------+
+
+---
+
+Phase 4: Optimizer Engine
+
+flowchart TD
+
+    A[Input Document] --> B[Normalize]
+    B --> C[Parse]
+    C --> D[Intelligence]
+    D --> E[Diagnostics]
+    E --> F[Suggestions]
+
+---
+
+## Case 4 — False heading candidates
+
+These should NOT become headings:
+
+Update OS
+
+Install Dependencies
+
+Backup database
+
+Monitor CPU temperature
+
+Check system load
+
+---
+
+## Case 5 — True semantic headings
+
+These should be suggested as headings:
+
+Project Overview
+
+Hardware Platform
+
+Software Architecture
+
+Database Structure
+
+Development Roadmap
+
+Project Objective
