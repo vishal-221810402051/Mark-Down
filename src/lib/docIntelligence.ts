@@ -552,16 +552,34 @@ export function extractDocIntelligence(params: {
   };
 
   const hierarchy: DocHierarchyNode[] = [];
+  let hierarchyNodeCounter = 0;
+  const makeHierarchyNodeId = (prefix: string) => {
+    hierarchyNodeCounter += 1;
+    return `${prefix}-${hierarchyNodeCounter}`;
+  };
 
   const titleHeading = headings.find((h) => h.level === 1) ?? headings[0] ?? null;
+  const titleNodeText = titleBlock.title?.trim() || titleHeading?.text.trim() || null;
 
-  if (titleHeading) {
+  if (titleNodeText) {
     hierarchy.push({
-      id: titleHeading.id,
-      text: titleHeading.text,
+      id: titleHeading?.id ?? makeHierarchyNodeId("title"),
+      text: titleNodeText,
       role: "title",
       level: 1,
       confidence: 0.98,
+    });
+  }
+
+  for (const line of titleBlock.subtitleLines) {
+    const textLine = line.trim();
+    if (!textLine) continue;
+    hierarchy.push({
+      id: makeHierarchyNodeId("subtitle"),
+      text: textLine,
+      role: "subtitle",
+      level: 2,
+      confidence: 0.9,
     });
   }
 
