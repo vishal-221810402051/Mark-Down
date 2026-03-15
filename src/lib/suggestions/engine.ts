@@ -1,5 +1,6 @@
 ﻿import type { Suggestion, SuggestionPatch } from "./types";
 import { extractDocDiagnostics } from "@/lib/docDiagnostics";
+import type { DocIntelligence } from "@/lib/docIntelligence";
 
 function uid(prefix: string) {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
@@ -333,6 +334,10 @@ function computeSuggestionConfidence(s: Suggestion): number {
     return 0.9;
   }
 
+  if (title === "add parent section for module group") {
+    return 0.78;
+  }
+
   if (title === "promote semantic heading") {
     return 0.75;
   }
@@ -498,6 +503,7 @@ function suppressSuggestions(
 export function generateSuggestions(
   rawText: string,
   normalizedText: string,
+  intelligence?: DocIntelligence,
 ): Suggestion[] {
   const suggestions: Suggestion[] = [];
   const diagnostics = extractDocDiagnostics({
@@ -716,6 +722,44 @@ export function generateSuggestions(
     }
     const trimmed = line.trim();
 
+    if (intelligence?.hierarchy) {
+      const node = intelligence.hierarchy.find(
+        (n) => n.text.trim() === trimmed,
+      );
+
+      if (
+        node &&
+        (
+          node.role === "entity" ||
+          node.role === "label" ||
+          node.role === "title" ||
+          node.role === "subtitle"
+        )
+      ) {
+        continue;
+      }
+
+      // suppress short entity-like lines next to labels
+      const prevNB = previousNonBlankLine(lines, i - 1);
+      const nextNB = nextNonBlankLine(lines, i + 1);
+
+      if (
+        node?.role === "section" &&
+        (
+          (prevNB &&
+            intelligence.hierarchy.some(
+              (h) => h.text.trim() === prevNB.trim() && h.role === "label",
+            )) ||
+          (nextNB &&
+            intelligence.hierarchy.some(
+              (h) => h.text.trim() === nextNB.trim() && h.role === "label",
+            ))
+        )
+      ) {
+        continue;
+      }
+    }
+
     // suppress roadmap-style list items from becoming headings
     if (isRoadmapItemLine(trimmed)) {
       const prevNB = previousNonBlankLine(lines, i - 1);
@@ -845,6 +889,42 @@ export function generateSuggestions(
         },
       ],
     });
+  }
+
+  // hierarchy-aware orphan subsection detection
+  if (intelligence?.hierarchy) {
+    const orphanModules = intelligence.hierarchy.filter(
+      (n) =>
+        n.role === "subsection" &&
+        !n.parentId &&
+        /^module\s+\d+/i.test(n.text),
+    );
+
+    if (orphanModules.length >= 2) {
+      suggestions.push({
+        id: "add-parent-architecture-section",
+        title: "Add parent section for module group",
+        rationale:
+          "Multiple module subsections appear without a parent architecture section.",
+        patches: [
+          {
+            target: "normalized",
+            apply(text: string) {
+              const firstModule = orphanModules[0]?.text ?? "";
+              const idx = firstModule ? text.indexOf(firstModule) : -1;
+
+              if (idx === -1) return text;
+
+              return (
+                text.slice(0, idx) +
+                "## System Architecture Overview\n\n" +
+                text.slice(idx)
+              );
+            },
+          },
+        ],
+      });
+    }
   }
 
   const context = getSuggestionContext(rawText);

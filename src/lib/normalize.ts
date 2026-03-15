@@ -415,6 +415,18 @@ function isLikelyInstructionLabel(line: string, nextNonBlank: string): boolean {
   );
 }
 
+function looksLikeTechnicalEntityLine(text: string): boolean {
+  const s = text.trim();
+  if (!s) return false;
+
+  return (
+    /^(?:[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\s+(?:Engine|Module|Sensor|Valve|Probe|Camera|Reservoir|Cartridge|Channel|Layer|Subsystem))$/.test(
+      s,
+    ) ||
+    /^[A-Z][a-z]+(?:\/[A-Z]?[a-z]+)+$/.test(s)
+  );
+}
+
 function nextLooksLikeCommandBlock(next: string): boolean {
   const s = next.trim();
   if (!s) return false;
@@ -716,6 +728,42 @@ export function normalizeInput(
         out1.push(`## ${line.trim()}`);
         notes.push(`Detected semantic subtitle: ${line.trim()}`);
         stats.headingsFixed++;
+        continue;
+      }
+
+      const nextNB = nextNonBlankLine(lines, i + 1);
+      const prevNB = prevNonBlankLine(lines, i - 1);
+
+      // block entity lists
+      if (
+        nextNB &&
+        nextNB.split(/\s+/).length <= 3 &&
+        !nextNB.endsWith(":")
+      ) {
+        out1.push(line);
+        continue;
+      }
+
+      // block when previous line indicates a list intro
+      if (
+        prevNB &&
+        /include|monitor|categories|integrates|sensors/i.test(prevNB)
+      ) {
+        out1.push(line);
+        continue;
+      }
+
+      // block component lists introduced by description lines
+      if (
+        prevNB &&
+        /engine|module|component|includes|integrates/i.test(prevNB)
+      ) {
+        out1.push(line);
+        continue;
+      }
+
+      if (looksLikeTechnicalEntityLine(line)) {
+        out1.push(line);
         continue;
       }
 
@@ -1429,6 +1477,4 @@ export function normalizeInput(
 
   return { normalizedText, notes, stats };
 }
-
-
 

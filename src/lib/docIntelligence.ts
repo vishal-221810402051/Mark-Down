@@ -44,6 +44,28 @@ export type DocWorkflowInfo = {
   keywordSignals: number;
 };
 
+export type DocHierarchyRole =
+  | "title"
+  | "subtitle"
+  | "section"
+  | "subsection"
+  | "label"
+  | "entity";
+
+export type DocHierarchyNode = {
+  id: string;
+  text: string;
+  role: DocHierarchyRole;
+  level: number;
+  parentId?: string;
+  confidence: number;
+};
+
+export type DocTitleBlockInfo = {
+  title: string | null;
+  subtitleLines: string[];
+};
+
 export type DocListInfo = {
   ordered: boolean;
   itemCount: number;
@@ -84,6 +106,8 @@ export type DocIntelligence = {
   lists: DocListInfo[];
   roadmaps: DocRoadmapInfo[];
   workflows?: DocWorkflowInfo[];
+  hierarchy?: DocHierarchyNode[];
+  titleBlock?: DocTitleBlockInfo;
   summary: DocSummaryInfo;
   stats: DocStats;
   normalizationNotes: string[];
@@ -180,6 +204,63 @@ function countWorkflowKeywords(text: string): number {
     (count, k) => count + (lower.includes(k) ? 1 : 0),
     0,
   );
+}
+
+function looksLikeModuleHeading(text: string): boolean {
+  return /^module\s+\d+\b/i.test(text.trim());
+}
+
+function looksLikeSectionNumber(text: string): boolean {
+  return /^\d+(?:\.\d+)*[.)]?\s+/.test(text.trim());
+}
+
+function stripSectionNumber(text: string): string {
+  return text.trim().replace(/^\d+(?:\.\d+)*[.)]?\s+/, "").trim();
+}
+
+const LABEL_PATTERN =
+  /^(steps?|workflow|deliverables?|acceptance checks?|goals?|notes?|requirements?)$/i;
+
+function inferPlainTitleBlock(lines: string[]): DocTitleBlockInfo {
+  const top = lines.map((s) => s.trim()).filter(Boolean).slice(0, 4);
+
+  const title = top[0] ?? null;
+  const subtitleLines: string[] = [];
+
+  for (let i = 1; i < top.length; i++) {
+    const line = top[i];
+    if (!line) continue;
+    if (/^#{1,6}\s+/.test(line)) break;
+    if (/^\d+(?:\.\d+)*[.)]?\s+/.test(line)) break;
+    if (/^(inventor|patent|current maturity|trl|author)\b/i.test(line)) break;
+    subtitleLines.push(line);
+  }
+
+  return { title, subtitleLines };
+}
+
+function inferHeadingRole(
+  text: string,
+  level: number,
+): { role: DocHierarchyRole; confidence: number } {
+  const t = text.trim();
+
+  if (looksLikeModuleHeading(t)) {
+    return { role: "subsection", confidence: 0.92 };
+  }
+
+  if (looksLikeSectionNumber(t)) {
+    return { role: level <= 2 ? "section" : "subsection", confidence: 0.9 };
+  }
+
+  if (/^(executive summary|problem context|core system concept|system architecture overview|embedded intelligence architecture|system safety architecture|current development stage|regulatory development strategy|development capital strategy|strategic vision)$/i.test(t)) {
+    return { role: "section", confidence: 0.95 };
+  }
+
+  return {
+    role: level <= 2 ? "section" : "subsection",
+    confidence: 0.75,
+  };
 }
 
 function parseClassToken(className: string, prefix: string): string | null {
@@ -447,6 +528,104 @@ export function extractDocIntelligence(params: {
     });
   }
 
+  const text = html
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|section|article|h[1-6]|li|pre)\s*>/gi, "\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\u00A0/g, " ")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  const plainLines = text.replace(/\r\n/g, "\n").split("\n");
+  const inferredTitleBlock = inferPlainTitleBlock(plainLines);
+
+  const titleBlock: DocTitleBlockInfo = {
+    title: inferredTitleBlock.title ?? title,
+    subtitleLines: inferredTitleBlock.subtitleLines,
+  };
+
+  const hierarchy: DocHierarchyNode[] = [];
+
+  const titleHeading = headings.find((h) => h.level === 1) ?? headings[0] ?? null;
+
+  if (titleHeading) {
+    hierarchy.push({
+      id: titleHeading.id,
+      text: titleHeading.text,
+      role: "title",
+      level: 1,
+      confidence: 0.98,
+    });
+  }
+
+  let lastSectionId: string | undefined;
+
+  for (const h of headings) {
+    if (titleHeading && h.id === titleHeading.id) continue;
+
+    const cleanText = stripSectionNumber(h.text);
+
+    // Prevent label-like lines from becoming real sections.
+    const normalizedLabelText = cleanText.replace(/:$/, "").trim();
+    if (LABEL_PATTERN.test(normalizedLabelText)) {
+      const labelNode: DocHierarchyNode = {
+        id: h.id,
+        text: cleanText,
+        role: "label",
+        level: h.level,
+        confidence: 0.9,
+      };
+
+      if (lastSectionId) {
+        labelNode.parentId = lastSectionId;
+      }
+
+      hierarchy.push(labelNode);
+      continue;
+    }
+
+    const inferred = inferHeadingRole(cleanText, h.level);
+
+    const node: DocHierarchyNode = {
+      id: h.id,
+      text: cleanText,
+      role: inferred.role,
+      level: h.level,
+      confidence: inferred.confidence,
+    };
+
+    if (node.role === "section") {
+      lastSectionId = node.id;
+    } else if (node.role === "subsection" && lastSectionId) {
+      node.parentId = lastSectionId;
+    }
+
+    hierarchy.push(node);
+  }
+
+  for (const p of procedures) {
+    const existing = hierarchy.some(
+      (n) => n.text.toLowerCase() === p.title.trim().toLowerCase(),
+    );
+    if (existing) continue;
+
+    hierarchy.push({
+      id: `proc-${p.kind}-${p.title.toLowerCase().replace(/\s+/g, "-")}`,
+      text: p.title.trim(),
+      role: "label",
+      level: lastSectionId ? 3 : 2,
+      parentId: lastSectionId,
+      confidence: 0.72,
+    });
+  }
+
   const stats: DocStats = {
     headings: headings.length,
     codeBlocks: codeBlocks.filter((b) => b.kind === "code").length,
@@ -478,6 +657,8 @@ export function extractDocIntelligence(params: {
     lists,
     roadmaps,
     workflows,
+    hierarchy,
+    titleBlock,
     summary,
     stats,
     normalizationNotes,

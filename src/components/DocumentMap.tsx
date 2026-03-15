@@ -86,6 +86,11 @@ export default function DocumentMap({
   activeHeadingId,
 }: Props) {
   const sections = intelligence?.headings ?? [];
+  const title =
+    intelligence?.titleBlock?.title ??
+    sections.find((h) => h.level === 1)?.text ??
+    sections[0]?.text ??
+    null;
   const codeBlocks = intelligence?.codeBlocks ?? [];
   const tables = intelligence?.tables ?? [];
   const diagrams = intelligence?.diagrams ?? [];
@@ -96,6 +101,7 @@ export default function DocumentMap({
     <aside className="h-full overflow-auto rounded-2xl border border-white/10 bg-black/25 p-3 backdrop-blur-2xl shadow-[0_18px_45px_rgba(0,0,0,0.35)]">
       <div className="mb-3">
         <div className="text-sm font-bold text-white/95">Document Map</div>
+        {title ? <div className="text-xs text-white/70">{title}</div> : null}
         {intelligence ? (
           <div className="mt-1 text-xs leading-5 text-white/55">
             {intelligence.stats.headings} headings · {intelligence.stats.commandBlocks} commands

@@ -114,8 +114,8 @@ export default function HomePage() {
   }, [effectiveNormalized, includeToc, tocDepth]);
 
   useEffect(() => {
-    setSuggestions(generateSuggestions(rawText, normalizedText));
-  }, [rawText, normalizedText]);
+    setSuggestions(generateSuggestions(rawText, normalizedText, intelligence ?? undefined));
+  }, [rawText, normalizedText, intelligence]);
 
   const diagnostics: DocDiagnostics = useMemo(
     () =>

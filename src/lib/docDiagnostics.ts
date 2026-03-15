@@ -141,7 +141,10 @@ function findUnfencedCommandCandidates(ctx: LineContext): DocDiagnostic[] {
   return items;
 }
 
-function findHeadingHierarchyIssues(headings: DocHeading[]): DocDiagnostic[] {
+function findHeadingHierarchyIssues(
+  headings: DocHeading[],
+  intelligence: DocIntelligence | null,
+): DocDiagnostic[] {
   const items: DocDiagnostic[] = [];
   if (headings.length === 0) {
     pushUnique(items, {
@@ -153,7 +156,7 @@ function findHeadingHierarchyIssues(headings: DocHeading[]): DocDiagnostic[] {
   }
 
   const h1Count = headings.filter((h) => h.depth === 1).length;
-  if (h1Count === 0) {
+  if (h1Count === 0 && !intelligence?.titleBlock?.title) {
     pushUnique(items, {
       kind: "heading_hierarchy_issue",
       severity: "warning",
@@ -352,7 +355,7 @@ export function extractDocDiagnostics(params: ExtractParams): DocDiagnostics {
 
   items.push(...findPlainCalloutCandidates(ctx));
   items.push(...findUnfencedCommandCandidates(ctx));
-  items.push(...findHeadingHierarchyIssues(headings));
+  items.push(...findHeadingHierarchyIssues(headings, intelligence));
   items.push(...findWeakSectionStructure(intelligence));
   items.push(...findTableAmbiguity(ctx, intelligence));
   items.push(...findMermaidRisks(normalizedText, renderedHtml, intelligence));

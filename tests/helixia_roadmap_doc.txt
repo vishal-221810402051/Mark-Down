@@ -1,4 +1,6 @@
-HELIXA PRO V1 — Roadmap + Electronics BOM (with Notes/Warnings) + Flowcharts + Estimates
+HELIXA PRO V1
+
+Roadmap + Electronics BOM (with Notes/Warnings) + Flowcharts + Estimates
 
 (Based on the locked V1 spec and architecture in the master document.) 
 
