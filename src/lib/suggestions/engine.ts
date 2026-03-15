@@ -230,6 +230,45 @@ function shouldSuggestSemanticHeading(
   return true;
 }
 
+function isRoadmapItemLine(line: string): boolean {
+  const s = line.trim();
+  return /^(Phase|Step|Stage|Milestone|Part|Module)\s+\d+\s*[:\-–]/i.test(s);
+}
+
+function previousNonBlankLine(lines: string[], startIndex: number): string {
+  for (let j = startIndex; j >= 0; j--) {
+    const s = (lines[j] ?? "").trim();
+    if (s) return s;
+  }
+  return "";
+}
+
+function nextNonBlankLine(lines: string[], startIndex: number): string {
+  for (let j = startIndex; j < lines.length; j++) {
+    const s = (lines[j] ?? "").trim();
+    if (s) return s;
+  }
+  return "";
+}
+
+function looksLikeTechnicalSentence(line: string): boolean {
+  const s = line.trim();
+  if (!s) return false;
+
+  const words = s.split(/\s+/).filter(Boolean);
+
+  return (
+    words.length >= 5 &&
+    !looksLikeRealSectionLabel(s) &&
+    (
+      /\b(this|that|these|those|it|they|system|document)\b/i.test(s) ||
+      /\b(should|must|will|can|could|would|may|might|include|confirm|validate|ensure|test)\b/i.test(
+        s,
+      )
+    )
+  );
+}
+
 function looksLikeRealSectionLabel(line: string): boolean {
   const s = line.trim();
   return /^(Project Overview|Overview|Core Concept|Functional Workflow|Key Features|Hardware Platform|Hardware Cost Estimate|Software Architecture|Database Structure|Development Roadmap|System Alerts & Warnings|Project Objective|System Requirements|Database Schema|Research Roadmap|Estimated Timeline|Alerts & Warnings)$/i.test(
@@ -237,15 +276,39 @@ function looksLikeRealSectionLabel(line: string): boolean {
   );
 }
 
-function getSuggestionPriority(s: Suggestion): number {
+function getSuggestionContext(text: string) {
+  const t = text.replace(/\r\n/g, "\n");
+
+  const phaseCount = (t.match(/^\s*Phase \d+/gm) ?? []).length;
+
+  const diagramHints =
+    (t.match(/\b(flowchart|graph\s+(?:TD|LR)|sequenceDiagram)\b|-->/g) ?? []).length;
+
+  const commandCount =
+    (t.match(
+      /^(npm|pnpm|yarn|docker|git|curl|wget|sqlite3|python|python3|pip|pip3|streamlit|mkdir|cd|touch|chmod|source|cp|mv|rm|sudo)\b/gm,
+    ) ?? []).length;
+
+  return {
+    isRoadmapLike: phaseCount >= 3 || diagramHints >= 2,
+    isSetupLike: commandCount >= 8,
+  };
+}
+
+function getSuggestionPriority(
+  s: Suggestion,
+  context?: { isRoadmapLike: boolean; isSetupLike: boolean },
+): number {
   const title = s.title.toLowerCase();
   const rationale = s.rationale.toLowerCase();
 
   if (title.startsWith("wrap ") && title.includes("command lines as bash block")) {
+    if (context?.isSetupLike) return 110;
     return 100;
   }
 
   if (title === "fence command block") {
+    if (context?.isSetupLike) return 100;
     return 90;
   }
 
@@ -284,12 +347,15 @@ function getSuggestionPriority(s: Suggestion): number {
   return 10;
 }
 
-function sortSuggestions(suggestions: Suggestion[]): Suggestion[] {
+function sortSuggestions(
+  suggestions: Suggestion[],
+  context?: { isRoadmapLike: boolean; isSetupLike: boolean },
+): Suggestion[] {
   return suggestions
     .map((s, index) => ({
       s,
       index,
-      priority: getSuggestionPriority(s),
+      priority: getSuggestionPriority(s, context),
     }))
     .sort((a, b) => {
       if (b.priority !== a.priority) return b.priority - a.priority;
@@ -297,11 +363,60 @@ function sortSuggestions(suggestions: Suggestion[]): Suggestion[] {
     })
     .map((x) => x.s);
 }
+
+function isNoOpSuggestion(s: Suggestion, normalizedText: string): boolean {
+  try {
+    if (!s.patches || s.patches.length === 0) return true;
+
+    return s.patches.every((p) => {
+      if (p.target !== "normalized") return false;
+      const result = p.apply(normalizedText);
+      return result === normalizedText;
+    });
+  } catch {
+    return false;
+  }
+}
+
+function suppressSuggestions(
+  suggestions: Suggestion[],
+  normalizedText: string,
+  context?: { isRoadmapLike: boolean; isSetupLike: boolean },
+): Suggestion[] {
+  const out: Suggestion[] = [];
+
+  for (const s of suggestions) {
+    const title = s.title.toLowerCase();
+
+    // 1️⃣ remove suggestions that do nothing
+    if (isNoOpSuggestion(s, normalizedText)) continue;
+
+    // 2️⃣ suppress weak normalized-output rule
+    if (title.includes("use normalized output")) continue;
+
+    // 3️⃣ suppress table suggestion if it is a no-op
+    if (title.includes("convert pipe text to table")) continue;
+
+    // roadmap/spec docs: suppress setup-style command suggestions
+    if (
+      context?.isRoadmapLike &&
+      (title === "fence command block" ||
+        (title.startsWith("wrap ") && title.includes("command lines as bash block")))
+    ) {
+      continue;
+    }
+
+    out.push(s);
+  }
+
+  return out;
+}
 export function generateSuggestions(
   rawText: string,
   normalizedText: string,
 ): Suggestion[] {
   const suggestions: Suggestion[] = [];
+  const context = getSuggestionContext(rawText);
   const diagnostics = extractDocDiagnostics({
     rawText,
     normalizedText,
@@ -498,16 +613,44 @@ export function generateSuggestions(
     ) {
       continue;
     }
+    const trimmed = line.trim();
+
+    // suppress roadmap-style list items from becoming headings
+    if (isRoadmapItemLine(trimmed)) {
+      const prevNB = previousNonBlankLine(lines, i - 1);
+      const nextNB = nextNonBlankLine(lines, i + 1);
+
+      // if surrounded by other roadmap items, this is part of a list, not a section
+      if (isRoadmapItemLine(prevNB) || isRoadmapItemLine(nextNB)) {
+        continue;
+      }
+    }
+
+    if (looksLikeTechnicalSentence(trimmed)) {
+      continue;
+    }
+
+    // block sentence-like colon lines
+    if (
+      /:$/.test(trimmed) &&
+      (
+        /\b(should|must|will|can|could|would|may|might|is|are|was|were)\b/i.test(trimmed) ||
+        /\b(this|that|these|those)\b/i.test(trimmed) ||
+        trimmed.split(/\s+/).length > 6
+      )
+    ) {
+      continue;
+    }
 
     suggestions.push({
-      id: `heading-${i}-${line.trim()}`,
+      id: `heading-${i}-${trimmed}`,
       title: "Promote semantic heading",
       rationale: "This line looks like a section heading",
       patches: [
         {
           target: "normalized",
           apply(text: string) {
-            return text.replace(line, `## ${line.trim()}`);
+            return text.replace(line, `## ${trimmed}`);
           },
         },
       ],
@@ -530,7 +673,9 @@ export function generateSuggestions(
     });
   }
 
-  return sortSuggestions(dedupeSuggestions(suggestions));
+  const deduped = dedupeSuggestions(suggestions);
+  const suppressed = suppressSuggestions(deduped, normalizedText, context);
+  return sortSuggestions(suppressed, context);
 }
 
 

@@ -83,6 +83,15 @@ function guessCodeLang(lines: string[]): string {
   ) {
     return "sql";
   }
+  if (
+    lines.some((line) =>
+      /^(npm|pnpm|yarn|docker|git|curl|wget|sqlite3|python|python3|pip|pip3|streamlit|mkdir|cd|touch|chmod|source|cp|mv|rm|sudo|htop|vcgencmd|\.quit|\.mode|\.import)\b/.test(
+        line.trim(),
+      ),
+    )
+  ) {
+    return "bash";
+  }
   if (/\b(def|import|from|class)\b/.test(text) && !/[;{}]/.test(text))
     return "python";
   if (
@@ -327,9 +336,13 @@ function isLikelySetupLabel(line: string): boolean {
   );
 }
 
-function isLikelySqlLike(text: string): boolean {
-  return /\b(CREATE TABLE|PRIMARY KEY|INTEGER|TEXT|REAL|SELECT COUNT\(\*\)|CREATE INDEX)\b/i.test(
-    text,
+function isLikelySqlLike(line: string): boolean {
+  const s = line.trim();
+  if (!s) return false;
+
+  return (
+    /^(CREATE|ALTER|DROP|INSERT|DELETE|SELECT|WITH|PRAGMA)\b/i.test(s) ||
+    /^UPDATE\s+.+\s+SET\b/i.test(s)
   );
 }
 
@@ -417,13 +430,24 @@ function nextLooksLikeCommandBlock(next: string): boolean {
   );
 }
 
-function isLikelySemanticHeadingLine(line: string): boolean {
+function isLikelySemanticHeadingLine(line: string, nextNonBlank = ""): boolean {
   const s = line.trim();
   if (!s) return false;
+  // block sentence-like lines ending with ":" that contain verbs
+  if (/:$/.test(s) && /\b(should|must|will|can|could|would|may|might|is|are|was|were)\b/i.test(s)) {
+    return false;
+  }
   if (s.length > 72) return false;
+  // imperative step labels are usually not section headings
+  if (/^(Update|Install|Create|Run|Verify|Check|Backup|Monitor|Save|Load|Access|Activate)\b/i.test(s)) {
+    return false;
+  }
+  // block labels followed by commands
+  if (isLikelyCommand(nextNonBlank)) {
+    return false;
+  }
   if (/^(ALERT|WARNING|NOTE|TIP)\s*:/i.test(s)) return false;
   if (/^(Recommended|Notes|Alerts|Warnings)$/i.test(s)) return false;
-  if (/[:.;!?]$/.test(s)) return false;
   if (/^\d+(?:\.\d+)*\s+/.test(s)) return false;
   if (/^\d+\.\s+/.test(s)) return false;
   if (/^[-*+]\s+/.test(s)) return false;
@@ -445,9 +469,18 @@ function shouldPromoteSemanticHeading(
   nextNonBlank: string,
 ): boolean {
   if (/^\d+[.)]\s+/.test(line.trim())) return false;
+  const trimmed = line.trim();
+
+  // block sentence-like colon lines before section-title heuristics can override
+  if (
+    /:$/.test(trimmed) &&
+    /\b(should|must|will|can|could|would|may|might|is|are|was|were)\b/i.test(trimmed)
+  ) {
+    return false;
+  }
 
   const sectionTitleLike = looksLikeSectionTitle(line);
-  const semanticLike = isLikelySemanticHeadingLine(line) || sectionTitleLike;
+  const semanticLike = isLikelySemanticHeadingLine(line, nextNonBlank) || sectionTitleLike;
   if (!semanticLike) return false;
   if (!sectionTitleLike && prev.trim() !== "") return false;
 
@@ -613,6 +646,19 @@ export function normalizeInput(
     ) {
       const prev = (lines[i - 1] ?? "").trim();
       const next = (lines[i + 1] ?? "").trim();
+      const prevNB = prevNonBlankLine(lines, i - 1);
+      const nextNB = nextNonBlankLine(lines, i + 1);
+
+      // detect if we are inside a roadmap run
+      if (
+        /^\s*(Phase|Step|Part|Module)\s+\d+/i.test(prevNB) ||
+        /^\s*(Phase|Step|Part|Module)\s+\d+/i.test(nextNB)
+      ) {
+        out1.push(line);
+        continue;
+      }
+
+      // only promote if surrounded by blank lines
       if (prev === "" && next === "") {
         out1.push(`## ${line.trim()}`);
         notes.push(`Promoted to heading: ## ${line.trim()}`);
@@ -824,6 +870,13 @@ export function normalizeInput(
         const t = nxt.trim();
 
         if (!t) {
+          // allow one blank line inside command/setup blocks
+          const nextLine = (out2[j + 1] ?? "").trim();
+          if (block.length > 0 && isLikelyCommand(nextLine)) {
+            block.push("");
+            j++;
+            continue;
+          }
           if (block.length > 0) break;
           j++;
           continue;
@@ -983,6 +1036,7 @@ export function normalizeInput(
 
       while (j < out2b.length) {
         const nxt = out2b[j] ?? "";
+        const nxtTrimmed = nxt.trim();
 
         if (isFenceOpenLine(nxt) !== null) break;
         if (/^\s*#{1,6}\s+/.test(nxt)) break;
@@ -992,8 +1046,25 @@ export function normalizeInput(
         if (isSeparator(nxt)) break;
         if (isBlockquote(nxt)) break;
 
-        if (nxt.trim() === "") {
-          if (sqlLikeStart) break;
+        if (!nxtTrimmed) {
+          if (sqlLikeStart) {
+            const nextNext = (out2b[j + 1] ?? "").trim();
+            // allow blank lines inside SQL blocks if another SQL-ish line follows
+            if (
+              isLikelySqlLike(nextNext) ||
+              /^["`A-Za-z_][A-Za-z0-9_"`]*\s+(INTEGER|TEXT|REAL|BLOB|NUMERIC|PRIMARY|REFERENCES|NOT|UNIQUE|CHECK|DEFAULT|COLLATE)\b/i.test(
+                nextNext,
+              ) ||
+              nxtTrimmed === ");" ||
+              /^[),;]+$/.test(nextNext) ||
+              nextNext === ");"
+            ) {
+              block.push(nxt);
+              j++;
+              continue;
+            }
+            break;
+          }
           blankCount++;
           if (blankCount > 1) break;
           block.push(nxt);
@@ -1003,9 +1074,20 @@ export function normalizeInput(
 
         blankCount = 0;
         if (sqlLikeStart) {
-          block.push(nxt);
-          j++;
-          continue;
+          // keep SQL block open for SQL continuations and statement closers
+          if (
+            isLikelySqlLike(nxtTrimmed) ||
+            /^["`A-Za-z_][A-Za-z0-9_"`]*\s+(INTEGER|TEXT|REAL|BLOB|NUMERIC|PRIMARY|REFERENCES|NOT|UNIQUE|CHECK|DEFAULT|COLLATE)\b/i.test(
+              nxtTrimmed,
+            ) ||
+            nxtTrimmed === ");" ||
+            /^[),;]+$/.test(nxtTrimmed)
+          ) {
+            block.push(nxt);
+            j++;
+            continue;
+          }
+          break;
         }
         if (!looksLikeCodeLineGeneric(nxt)) break;
 
@@ -1054,7 +1136,12 @@ export function normalizeInput(
         while (j < outCodeFenced.length) {
           const nxt = outCodeFenced[j] ?? "";
           const nxtTrimmed = nxt.trim();
-          if (!nxtTrimmed) break;
+          // allow blank lines inside Mermaid blocks
+          if (!nxtTrimmed) {
+            block.push(nxt);
+            j++;
+            continue;
+          }
           if (/^\d+\.\d+/.test(nxtTrimmed)) break;
           if (/^(flowchart|graph|sequenceDiagram)/.test(nxtTrimmed)) break;
           if (isBlockBoundary(nxt)) break;
