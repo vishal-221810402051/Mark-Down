@@ -36,6 +36,14 @@ export type DocProcedureInfo = {
   itemCount: number;
 };
 
+export type DocWorkflowInfo = {
+  title: string;
+  stepCount: number;
+  hasMermaid: boolean;
+  hasAscii: boolean;
+  keywordSignals: number;
+};
+
 export type DocListInfo = {
   ordered: boolean;
   itemCount: number;
@@ -75,6 +83,7 @@ export type DocIntelligence = {
   procedures: DocProcedureInfo[];
   lists: DocListInfo[];
   roadmaps: DocRoadmapInfo[];
+  workflows?: DocWorkflowInfo[];
   summary: DocSummaryInfo;
   stats: DocStats;
   normalizationNotes: string[];
@@ -140,6 +149,39 @@ function classifyProcedureLabel(text: string): DocProcedureInfo["kind"] | null {
   return null;
 }
 
+function classifyWorkflowLabel(text: string): boolean {
+  const s = text.trim().toLowerCase();
+
+  return (
+    s.startsWith("workflow") ||
+    s.startsWith("pipeline") ||
+    s.startsWith("process") ||
+    s.startsWith("data flow") ||
+    s.startsWith("architecture flow")
+  );
+}
+
+function countWorkflowKeywords(text: string): number {
+  const keywords = [
+    "input",
+    "ingest",
+    "process",
+    "transform",
+    "pipeline",
+    "workflow",
+    "output",
+    "prediction",
+    "dashboard",
+  ];
+
+  const lower = text.toLowerCase();
+
+  return keywords.reduce(
+    (count, k) => count + (lower.includes(k) ? 1 : 0),
+    0,
+  );
+}
+
 function parseClassToken(className: string, prefix: string): string | null {
   const parts = className.split(/\s+/).filter(Boolean);
   const hit = parts.find((p) => p.startsWith(prefix));
@@ -160,6 +202,7 @@ export function extractDocIntelligence(params: {
   const procedures: DocProcedureInfo[] = [];
   const lists: DocListInfo[] = [];
   const roadmaps: DocRoadmapInfo[] = [];
+  const workflows: DocWorkflowInfo[] = [];
   const calloutPattern = /^(note|tip|warning|important)\s*:/i;
 
   const title = headings.find((h) => h.level === 1)?.text ?? headings[0]?.text ?? null;
@@ -370,6 +413,40 @@ export function extractDocIntelligence(params: {
     });
   }
 
+  for (const h of headings) {
+    if (!classifyWorkflowLabel(h.text)) continue;
+
+    const headingIndex = html.toLowerCase().indexOf(h.text.toLowerCase());
+    const center = headingIndex >= 0 ? headingIndex : 0;
+    const context = html.slice(
+      Math.max(0, center - 400),
+      center + 400,
+    );
+
+    const stepCount = (context.match(/^\d+\.\s+/gm) ?? []).length;
+
+    const hasMermaid =
+      context.includes("flowchart") ||
+      context.includes("graph TD") ||
+      context.includes("graph LR");
+
+    const hasAscii =
+      context.includes("+---") ||
+      context.includes("|") ||
+      context.includes("->") ||
+      context.includes("-->");
+
+    const keywordSignals = countWorkflowKeywords(context);
+
+    workflows.push({
+      title: h.text,
+      stepCount,
+      hasMermaid,
+      hasAscii,
+      keywordSignals,
+    });
+  }
+
   const stats: DocStats = {
     headings: headings.length,
     codeBlocks: codeBlocks.filter((b) => b.kind === "code").length,
@@ -400,6 +477,7 @@ export function extractDocIntelligence(params: {
     procedures,
     lists,
     roadmaps,
+    workflows,
     summary,
     stats,
     normalizationNotes,
