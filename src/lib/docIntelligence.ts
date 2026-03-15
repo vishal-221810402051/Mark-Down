@@ -169,6 +169,9 @@ function isSharedLabelFamily(text: string): boolean {
   return LABEL_PATTERN.test(normalizeLabelText(text));
 }
 
+const ENTITY_INTRO_PATTERN =
+  /(includes?|integrates?|components?|modules?|engines?|layers?|categories include|monitor|contains?|subsystems?)/i;
+
 function classifyProcedureLabel(text: string): DocProcedureInfo["kind"] | null {
   const s = normalizeLabelText(text);
 
@@ -195,6 +198,19 @@ function classifyWorkflowLabel(text: string): boolean {
     s.startsWith("data flow") ||
     s.startsWith("architecture flow")
   );
+}
+
+function looksLikeEntityLine(line: string): boolean {
+  const t = line.trim();
+  if (!t) return false;
+  if (t.length > 60) return false;
+  if (/[.?!]$/.test(t)) return false;
+  if (/^\d+[\).\s]/.test(t)) return false;
+  if (LABEL_PATTERN.test(t.replace(/:$/, ""))) return false;
+  if (/\b(is|are|was|were|should|must|can|will|uses|provides)\b/i.test(t)) return false;
+  if (t.split(/\s+/).filter(Boolean).length > 6) return false;
+
+  return /^[A-Za-z0-9][A-Za-z0-9\s\-\/(),+]+$/.test(t);
 }
 
 function countWorkflowKeywords(text: string): number {
@@ -650,6 +666,55 @@ export function extractDocIntelligence(params: {
       parentId: lastSectionId,
       confidence: 0.72,
     });
+  }
+
+  let lastEntityParentId: string | undefined = lastSectionId;
+  let previousNonBlank = "";
+
+  for (const rawLine of plainLines) {
+    const currentLine = rawLine.trim();
+    if (!currentLine) continue;
+
+    const matchedNode = hierarchy.find(
+      (n) => n.text.trim().toLowerCase() === currentLine.toLowerCase(),
+    );
+    if (matchedNode) {
+      if (
+        matchedNode.role === "section" ||
+        matchedNode.role === "subsection" ||
+        matchedNode.role === "label"
+      ) {
+        lastEntityParentId = matchedNode.id;
+      }
+      previousNonBlank = currentLine;
+      continue;
+    }
+
+    const intro = previousNonBlank.replace(/:$/, "").trim();
+    if (ENTITY_INTRO_PATTERN.test(intro) && looksLikeEntityLine(currentLine)) {
+      const duplicate = hierarchy.some(
+        (n) =>
+          n.role === "entity" &&
+          n.text.trim().toLowerCase() === currentLine.toLowerCase() &&
+          n.parentId === lastEntityParentId,
+      );
+
+      if (!duplicate) {
+        const parentNode = lastEntityParentId
+          ? hierarchy.find((n) => n.id === lastEntityParentId)
+          : undefined;
+        hierarchy.push({
+          id: makeHierarchyNodeId("entity"),
+          text: currentLine,
+          role: "entity",
+          level: parentNode ? Math.min(parentNode.level + 1, 6) : 3,
+          parentId: lastEntityParentId,
+          confidence: 0.76,
+        });
+      }
+    }
+
+    previousNonBlank = currentLine;
   }
 
   const stats: DocStats = {
