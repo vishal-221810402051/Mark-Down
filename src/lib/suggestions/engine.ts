@@ -283,28 +283,41 @@ function looksLikeRealSectionLabel(line: string): boolean {
 function getSuggestionContext(text: string) {
   const t = text.replace(/\r\n/g, "\n");
 
-  const phaseCount = (t.match(/^\s*Phase \d+/gm) ?? []).length;
+  const roadmapItems =
+    (t.match(/^\s*(Phase|Step|Stage|Milestone|Part|Module)\s+\d+\s*[:\-–]/gim) ?? []).length;
 
-  const diagramHints =
+  const diagrams =
     (t.match(/\b(flowchart|graph\s+(?:TD|LR)|sequenceDiagram)\b|-->/g) ?? []).length;
 
-  const commandCount =
+  const commands =
     (t.match(
-      /^(npm|pnpm|yarn|docker|git|curl|wget|sqlite3|python|python3|pip|pip3|streamlit|mkdir|cd|touch|chmod|source|cp|mv|rm|sudo)\b/gm,
+      /^(npm|pnpm|yarn|docker|git|curl|wget|sqlite3|python|python3|pip|pip3|streamlit|mkdir|cd|touch|chmod|source|cp|mv|rm|sudo)\b/gim,
     ) ?? []).length;
 
+  const headings =
+    (t.match(/^#{1,6}\s+/gm) ?? []).length;
+
   return {
-    isRoadmapLike: phaseCount >= 3 || diagramHints >= 2,
-    isSetupLike: commandCount >= 8,
+    isRoadmapLike: roadmapItems >= 3 || diagrams >= 2,
+    isSetupLike: commands >= 6,
+    isStructuredSpecLike: headings >= 4 && roadmapItems >= 2,
   };
 }
 
 function getSuggestionPriority(
   s: Suggestion,
-  context?: { isRoadmapLike: boolean; isSetupLike: boolean },
+  context?: {
+    isRoadmapLike: boolean;
+    isSetupLike: boolean;
+    isStructuredSpecLike: boolean;
+  },
 ): number {
   const title = s.title.toLowerCase();
   const rationale = s.rationale.toLowerCase();
+
+  if (context?.isSetupLike && title.startsWith("wrap ") && title.includes("command")) {
+    return 110;
+  }
 
   if (title.startsWith("wrap ") && title.includes("command lines as bash block")) {
     if (context?.isSetupLike) return 110;
@@ -314,6 +327,10 @@ function getSuggestionPriority(
   if (title === "fence command block") {
     if (context?.isSetupLike) return 100;
     return 90;
+  }
+
+  if (context?.isRoadmapLike && title === "convert to callout block") {
+    return 85;
   }
 
   if (title === "convert to callout block") {
@@ -353,7 +370,11 @@ function getSuggestionPriority(
 
 function sortSuggestions(
   suggestions: Suggestion[],
-  context?: { isRoadmapLike: boolean; isSetupLike: boolean },
+  context?: {
+    isRoadmapLike: boolean;
+    isSetupLike: boolean;
+    isStructuredSpecLike: boolean;
+  },
 ): Suggestion[] {
   return suggestions
     .map((s, index) => ({
@@ -385,7 +406,11 @@ function isNoOpSuggestion(s: Suggestion, normalizedText: string): boolean {
 function suppressSuggestions(
   suggestions: Suggestion[],
   normalizedText: string,
-  context?: { isRoadmapLike: boolean; isSetupLike: boolean },
+  context?: {
+    isRoadmapLike: boolean;
+    isSetupLike: boolean;
+    isStructuredSpecLike: boolean;
+  },
 ): Suggestion[] {
   const out: Suggestion[] = [];
 
@@ -410,6 +435,21 @@ function suppressSuggestions(
       continue;
     }
 
+    if (
+      context?.isRoadmapLike &&
+      title.includes("promote semantic heading") &&
+      /deliverables|acceptance checks/i.test(s.rationale + " " + s.title)
+    ) {
+      continue;
+    }
+
+    if (
+      context?.isSetupLike &&
+      title.includes("promote semantic heading")
+    ) {
+      continue;
+    }
+
     out.push(s);
   }
 
@@ -420,7 +460,6 @@ export function generateSuggestions(
   normalizedText: string,
 ): Suggestion[] {
   const suggestions: Suggestion[] = [];
-  const context = getSuggestionContext(rawText);
   const diagnostics = extractDocDiagnostics({
     rawText,
     normalizedText,
@@ -702,6 +741,7 @@ export function generateSuggestions(
     });
   }
 
+  const context = getSuggestionContext(rawText);
   const deduped = dedupeSuggestions(suggestions);
   const suppressed = suppressSuggestions(deduped, normalizedText, context);
   return sortSuggestions(suppressed, context);

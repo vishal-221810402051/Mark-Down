@@ -1,137 +1,170 @@
-# PHASE PROMOTION VALIDATION DOCUMENT
+# AI Data Processing System — Technical Specification
 
-This document verifies the roadmap phase promotion rule.
-
-The rule should behave as follows:
-
-- If phases appear as a simple list → keep them as plain text
-- If a phase has its own content block → promote it to a heading
+This document describes the architecture and implementation roadmap for a small AI data processing system built around Raspberry Pi hardware.
 
 ---
 
-## Case 1 — Phase list (should NOT become headings)
+## Project Overview
 
-Phase 0: Environment Setup
-Phase 1: Core Pipeline
-Phase 2: Diagnostics
-Phase 3: Suggestion Engine
-Phase 4: UI Refinement
+The goal of the system is to ingest environmental sensor data, process it locally using machine-learning models, and generate predictions for anomaly detection.
 
-These are only a roadmap overview.
+Key capabilities:
 
-None of them should become headings.
-
----
-
-## Case 2 — Phase sections (should become headings)
-
-Phase 0: Hardware Setup
-
-Install dependencies
-
-pip install pandas numpy
-pip install networkx scipy
-
-Create project folder
-
-mkdir app
-cd app
-
-Run application
-
-python app.py
-
-Expected output:
-
-Application started successfully.
+- Local data ingestion
+- Lightweight ML inference
+- Hardware monitoring
+- Dashboard visualization
 
 ---
 
-Phase 1: Database Setup
+## Hardware Platform
 
-CREATE TABLE users (
-    id INTEGER PRIMARY KEY,
-    email TEXT,
-    created_at TEXT
+| Component | Qty | Purpose |
+|---|---|---|
+| Raspberry Pi 5 | 1 | Main processing unit |
+| NVMe SSD | 1 | Data storage |
+| DS18B20 Sensor | 1 | Temperature monitoring |
+| Camera Module | 1 | Image capture |
+
+---
+
+## Development Roadmap
+
+Phase 0: Hardware Setup  
+Phase 1: OS Installation  
+Phase 2: Data Pipeline  
+Phase 3: Intelligence Engine  
+Phase 4: Optimizer System  
+Phase 5: UI Integration
+
+Deliverables
+
+- Working prototype
+- Hardware monitoring
+- Dataset pipeline
+
+Acceptance checks
+
+- System boots
+- Data loads correctly
+- Predictions generated
+
+---
+
+## Setup Guide
+
+To initialize the environment run the following commands.
+
+npm install
+npm run build
+npm run lint
+docker compose up --build -d
+
+Verify the service:
+
+curl http://localhost:3001/health
+
+---
+
+## Example Code
+
+The following example demonstrates a simple data validation function.
+
+function validateReading(temp) {
+  if (temp > 100) {
+    return "alert"
+  }
+
+  return "ok"
+}
+
+---
+
+## Database Schema
+
+CREATE TABLE sensor_data (
+  id INTEGER PRIMARY KEY,
+  sensor_id TEXT,
+  temperature REAL,
+  created_at TIMESTAMP
 );
 
-CREATE TABLE sessions (
-    id INTEGER PRIMARY KEY,
-    user_id INTEGER,
-    token TEXT
+CREATE TABLE predictions (
+  id INTEGER PRIMARY KEY,
+  reading_id INTEGER,
+  label TEXT,
+  confidence REAL
 );
 
-SELECT * FROM users;
+---
+
+## Monitoring Workflow
+
+Steps:
+
+1. Start the system
+2. Verify sensor readings
+3. Run prediction pipeline
+4. Inspect anomaly results
 
 ---
 
-Phase 2: Diagnostics Engine
+## System Alerts
 
-The diagnostics system should analyze documents and identify:
-
-- heading structure
-- code blocks
-- diagrams
-- tables
-- callouts
+Warning: High CPU temperature detected.  
+Note: Dataset size may impact model performance.  
+Tip: Enable swap on Raspberry Pi if running large models.
 
 ---
 
-## Case 3 — Phase with diagrams
+## Data Flow Diagram
 
-Phase 3: Document Flow
-
-+----------------------+
-|    User Input        |
-+----------------------+
-           |
-           v
-+----------------------+
-|   Normalization      |
-+----------------------+
-
----
-
-Phase 4: Optimizer Engine
-
+```mermaid
 flowchart TD
-
-    A[Input Document] --> B[Normalize]
-    B --> C[Parse]
-    C --> D[Intelligence]
-    D --> E[Diagnostics]
-    E --> F[Suggestions]
-
----
-
-## Case 4 — False heading candidates
-
-These should NOT become headings:
-
-Update OS
-
-Install Dependencies
-
-Backup database
-
-Monitor CPU temperature
-
-Check system load
+  A[Sensor Data] --> B[Data Pipeline]
+  B --> C[ML Model]
+  C --> D[Prediction]
+  D --> E[Dashboard]
+```
 
 ---
 
-## Case 5 — True semantic headings
+## ASCII Pipeline Diagram
 
-These should be suggested as headings:
++-------------+
+|  Sensor     |
++-------------+
+       |
+       v
++-------------+
+| Data Loader |
++-------------+
+       |
+       v
++-------------+
+| ML Model    |
++-------------+
+       |
+       v
++-------------+
+| Dashboard   |
++-------------+
 
-Project Overview
+---
 
-Hardware Platform
+## Notes
 
-Software Architecture
+This system is designed for edge environments where network connectivity may be unreliable. All processing is performed locally to minimize latency and dependency on cloud services.
 
-Database Structure
+---
 
-Development Roadmap
+## Expected Optimizer Behavior
 
-Project Objective
+After pasting this document, the optimizer should ideally:
+
+• Suggest converting warning/note/tip lines into callouts  
+• Detect command blocks for setup instructions  
+• Detect code blocks for JavaScript and SQL  
+• Avoid promoting roadmap phase lines into headings  
+• Recognize procedures under “Steps”  
+• Detect diagrams (Mermaid + ASCII)
