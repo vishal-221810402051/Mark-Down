@@ -325,6 +325,14 @@ function computeSuggestionConfidence(s: Suggestion): number {
     return 0.91;
   }
 
+  if (title === "convert to procedure section") {
+    return 0.88;
+  }
+
+  if (title === "convert to checklist section") {
+    return 0.9;
+  }
+
   if (title === "promote semantic heading") {
     return 0.75;
   }
@@ -757,6 +765,72 @@ export function generateSuggestions(
     });
   }
 
+  // detect procedure-like labels
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] ?? "";
+    const trimmed = line.trim();
+
+    if (!trimmed) continue;
+
+    if (/^(Steps|Workflow|Procedure)\s*:?\s*$/i.test(trimmed)) {
+      const nextNB = nextNonBlankLine(lines, i + 1);
+
+      if (/^\d+\.\s+/.test(nextNB)) {
+        suggestions.push({
+          id: `procedure-${i}`,
+          title: "Convert to procedure section",
+          rationale: "This looks like a procedure label followed by ordered steps.",
+          patches: [
+            {
+              target: "normalized",
+              apply(text: string) {
+                if (/^\s*#{1,6}\s+/.test(line)) return text;
+
+                return text.replace(
+                  new RegExp(`^${escapeRegex(line)}$`, "m"),
+                  `## ${trimmed.replace(/:$/, "")}`,
+                );
+              },
+            },
+          ],
+        });
+      }
+    }
+  }
+
+  // detect checklist / validation sections
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] ?? "";
+    const trimmed = line.trim();
+
+    if (!trimmed) continue;
+
+    if (/^(Deliverables|Requirements|Checklist|Acceptance checks|Validation)\s*:?\s*$/i.test(trimmed)) {
+      const nextNB = nextNonBlankLine(lines, i + 1);
+
+      if (/^[-*]\s+/.test(nextNB) || /^\d+\.\s+/.test(nextNB)) {
+        suggestions.push({
+          id: `checklist-${i}`,
+          title: "Convert to checklist section",
+          rationale: "This label appears to introduce a checklist-style list.",
+          patches: [
+            {
+              target: "normalized",
+              apply(text: string) {
+                if (/^\s*#{1,6}\s+/.test(line)) return text;
+
+                return text.replace(
+                  new RegExp(`^${escapeRegex(line)}$`, "m"),
+                  `## ${trimmed.replace(/:$/, "")}`,
+                );
+              },
+            },
+          ],
+        });
+      }
+    }
+  }
+
   if (diagnostics.items.some((i) => i.kind === "table_ambiguity")) {
     suggestions.push({
       id: "table-suggestion",
@@ -784,4 +858,3 @@ export function generateSuggestions(
   const suppressed = suppressSuggestions(deduped, normalizedText, context);
   return sortSuggestions(suppressed, context);
 }
-
