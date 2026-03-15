@@ -158,17 +158,29 @@ function classifyRoadmap(
   return null;
 }
 
-function classifyProcedureLabel(text: string): DocProcedureInfo["kind"] | null {
-  const s = text.trim().toLowerCase();
+function normalizeLabelText(text: string): string {
+  return text.trim().replace(/:$/, "").trim().toLowerCase();
+}
 
-  if (s.startsWith("steps")) return "steps";
-  if (s.startsWith("workflow")) return "workflow";
-  if (s.startsWith("procedure")) return "procedure";
-  if (s.startsWith("checklist")) return "checklist";
-  if (s.startsWith("requirements")) return "checklist";
-  if (s.startsWith("deliverables")) return "checklist";
-  if (s.startsWith("acceptance checks")) return "validation";
-  if (s.startsWith("validation")) return "validation";
+const LABEL_PATTERN =
+  /^(steps?|workflow|procedure|checklist|validation|deliverables?|acceptance checks?|goals?|requirements?|run|implementation|overview|notes?)$/i;
+
+function isSharedLabelFamily(text: string): boolean {
+  return LABEL_PATTERN.test(normalizeLabelText(text));
+}
+
+function classifyProcedureLabel(text: string): DocProcedureInfo["kind"] | null {
+  const s = normalizeLabelText(text);
+
+  if (s === "workflow") return "workflow";
+  if (/^checklist$/.test(s)) return "checklist";
+  if (/^deliverables?$/.test(s)) return "checklist";
+  if (/^requirements?$/.test(s)) return "checklist";
+  if (/^acceptance checks?$/.test(s)) return "validation";
+  if (/^validation$/.test(s)) return "validation";
+  if (/^steps?$/.test(s)) return "procedure";
+  if (/^procedure$/.test(s)) return "procedure";
+  if (/^run$/.test(s)) return "run";
 
   return null;
 }
@@ -217,9 +229,6 @@ function looksLikeSectionNumber(text: string): boolean {
 function stripSectionNumber(text: string): string {
   return text.trim().replace(/^\d+(?:\.\d+)*[.)]?\s+/, "").trim();
 }
-
-const LABEL_PATTERN =
-  /^(steps?|workflow|deliverables?|acceptance checks?|goals?|notes?|requirements?)$/i;
 
 function inferPlainTitleBlock(lines: string[]): DocTitleBlockInfo {
   const top = lines.map((s) => s.trim()).filter(Boolean).slice(0, 4);
@@ -591,8 +600,7 @@ export function extractDocIntelligence(params: {
     const cleanText = stripSectionNumber(h.text);
 
     // Prevent label-like lines from becoming real sections.
-    const normalizedLabelText = cleanText.replace(/:$/, "").trim();
-    if (LABEL_PATTERN.test(normalizedLabelText)) {
+    if (isSharedLabelFamily(cleanText)) {
       const labelNode: DocHierarchyNode = {
         id: h.id,
         text: cleanText,
