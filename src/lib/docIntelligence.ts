@@ -125,6 +125,21 @@ function classifyRoadmap(
   return null;
 }
 
+function classifyProcedureLabel(text: string): DocProcedureInfo["kind"] | null {
+  const s = text.trim().toLowerCase();
+
+  if (s.startsWith("steps")) return "steps";
+  if (s.startsWith("workflow")) return "workflow";
+  if (s.startsWith("procedure")) return "procedure";
+  if (s.startsWith("checklist")) return "checklist";
+  if (s.startsWith("requirements")) return "checklist";
+  if (s.startsWith("deliverables")) return "checklist";
+  if (s.startsWith("acceptance checks")) return "validation";
+  if (s.startsWith("validation")) return "validation";
+
+  return null;
+}
+
 function parseClassToken(className: string, prefix: string): string | null {
   const parts = className.split(/\s+/).filter(Boolean);
   const hit = parts.find((p) => p.startsWith(prefix));
@@ -299,6 +314,17 @@ export function extractDocIntelligence(params: {
       kind: kind as DocProcedureInfo["kind"],
       title,
       itemCount,
+    });
+  }
+
+  for (const h of headings) {
+    const kind = classifyProcedureLabel(h.text);
+    if (!kind) continue;
+
+    procedures.push({
+      kind,
+      title: h.text,
+      itemCount: 0,
     });
   }
 
