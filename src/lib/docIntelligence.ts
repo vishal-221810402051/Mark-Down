@@ -44,6 +44,24 @@ export type DocWorkflowInfo = {
   keywordSignals: number;
 };
 
+export type DocStructuralGroup = {
+  id: string;
+  kind:
+    | "prose_section"
+    | "entity_group"
+    | "procedure_block"
+    | "phase_block"
+    | "table_section"
+    | "list_section";
+  title?: string;
+  parentId?: string;
+  childNodeIds?: string[];
+  startLine?: number;
+  endLine?: number;
+  confidence?: number;
+  signals?: string[];
+};
+
 export type DocHierarchyRole =
   | "title"
   | "subtitle"
@@ -106,6 +124,7 @@ export type DocIntelligence = {
   lists: DocListInfo[];
   roadmaps: DocRoadmapInfo[];
   workflows?: DocWorkflowInfo[];
+  groups?: DocStructuralGroup[];
   hierarchy?: DocHierarchyNode[];
   titleBlock?: DocTitleBlockInfo;
   summary: DocSummaryInfo;
@@ -309,6 +328,7 @@ export function extractDocIntelligence(params: {
   const lists: DocListInfo[] = [];
   const roadmaps: DocRoadmapInfo[] = [];
   const workflows: DocWorkflowInfo[] = [];
+  const groups: DocStructuralGroup[] = [];
   const calloutPattern = /^(note|tip|warning|important)\s*:/i;
 
   const title = headings.find((h) => h.level === 1)?.text ?? headings[0]?.text ?? null;
@@ -717,6 +737,704 @@ export function extractDocIntelligence(params: {
     previousNonBlank = currentLine;
   }
 
+  // Structural grouping (Phase 20C-B2): additive groups only.
+  const normalizedHeadingText = new Set<string>();
+  for (const h of headings) {
+    const raw = h.text.trim().toLowerCase();
+    const stripped = stripSectionNumber(h.text).toLowerCase();
+    if (raw) normalizedHeadingText.add(raw);
+    if (stripped) normalizedHeadingText.add(stripped);
+  }
+
+  const lineToHierarchy = new Map<string, DocHierarchyNode[]>();
+  const idToHierarchy = new Map<string, DocHierarchyNode>();
+  for (const node of hierarchy) {
+    const key = node.text.trim().toLowerCase();
+    idToHierarchy.set(node.id, node);
+    if (!key) continue;
+    const arr = lineToHierarchy.get(key) ?? [];
+    arr.push(node);
+    lineToHierarchy.set(key, arr);
+  }
+
+  const titleNode = hierarchy.find((n) => n.role === "title");
+  const rootParentId = titleNode?.id;
+  const sectionNodeCount = hierarchy.filter((n) => n.role === "section").length;
+  const documentStructureWeak = headings.length < 3 && sectionNodeCount < 2;
+  const MAX_GROUP_SPAN = 10;
+
+  function normalizeGroupLine(value: string): string {
+    return value.trim().replace(/\s+/g, " ");
+  }
+
+  function nextNonBlankPlainLine(linesInput: string[], start: number): string {
+    for (let i = start; i < linesInput.length; i++) {
+      const s = normalizeGroupLine(linesInput[i] ?? "");
+      if (s) return s;
+    }
+    return "";
+  }
+
+  function looksLikeTableBoundary(line: string, nextLine = ""): boolean {
+    const s = normalizeGroupLine(line);
+    const n = normalizeGroupLine(nextLine);
+    if (!s) return false;
+
+    if (/^<table\b/i.test(s) || /^<\/table>/i.test(s)) return true;
+    if (/^\|.*\|$/.test(s)) return true;
+    if (/^[\-\s:|]{3,}$/.test(s) && s.includes("|")) return true;
+
+    // table-start style rows such as "A | B" or "A | B | C"
+    if (s.includes("|")) {
+      const cols = s.split("|").map((x) => x.trim()).filter(Boolean);
+      if (cols.length >= 2) return true;
+      if (/^[\-\s:|]{3,}$/.test(n) && n.includes("|")) return true;
+    }
+
+    return false;
+  }
+
+  function looksLikeCodeBoundary(line: string): boolean {
+    const s = normalizeGroupLine(line);
+    if (!s) return false;
+
+    if (/^`{3,}|^~{3,}/.test(s)) return true;
+    if (/^(FROM|RUN|CMD|ENTRYPOINT|COPY|ADD|ARG|ENV|EXPOSE|WORKDIR)\b/i.test(s)) {
+      return true;
+    }
+    if (
+      /^(function\b|const\b|let\b|var\b|def\b|class\b|import\b|export\b|if\s*\(|for\s*\(|while\s*\()/i.test(
+        s,
+      )
+    ) {
+      return true;
+    }
+    if (
+      /^(npm|pnpm|yarn|docker|git|curl|wget|sqlite3|python|python3|pip|pip3|streamlit|mkdir|cd|touch|chmod|source|cp|mv|rm|sudo)\b/i.test(
+        s,
+      )
+    ) {
+      return true;
+    }
+    if (/=>|[{}`;$]|^[<>].*/.test(s)) return true;
+
+    return false;
+  }
+
+  function looksLikeDiagramBoundary(line: string): boolean {
+    const s = normalizeGroupLine(line);
+    if (!s) return false;
+
+    if (
+      /^(graph\s+(TD|LR)|flowchart|sequenceDiagram|classDiagram|stateDiagram|erDiagram|journey|gantt)\b/i.test(
+        s,
+      )
+    ) {
+      return true;
+    }
+    if (/^[\u2500-\u257f]+$/.test(s)) return true;
+    if (/^[\u2190-\u21ff]|->|-->|\+---|^\|/.test(s)) return true;
+
+    return false;
+  }
+
+  function isHardBoundaryLine(line: string, nextLine = ""): boolean {
+    const s = normalizeGroupLine(line);
+    if (!s) return true;
+    const lower = s.toLowerCase();
+
+    if (normalizedHeadingText.has(lower)) return true;
+    if (/^#{1,6}\s+/.test(s)) return true;
+    if (looksLikeTableBoundary(s, nextLine)) return true;
+    if (looksLikeCodeBoundary(s)) return true;
+    if (looksLikeDiagramBoundary(s)) return true;
+
+    return false;
+  }
+
+  function isGroupingBoundaryLine(line: string): boolean {
+    const s = normalizeGroupLine(line);
+    if (!s) return true;
+    const lower = s.toLowerCase();
+
+    if (isHardBoundaryLine(s)) return true;
+    if (/^(CREATE|ALTER|DROP|INSERT|UPDATE|DELETE|SELECT|WITH|PRAGMA)\b/i.test(s)) return true;
+
+    const roleNodes = lineToHierarchy.get(lower) ?? [];
+    if (
+      roleNodes.some(
+        (n) =>
+          n.role === "title" ||
+          n.role === "section" ||
+          n.role === "subsection" ||
+          n.role === "label",
+      )
+    ) {
+      return true;
+    }
+
+    return false;
+  }
+
+  function looksCodeLikeProseTitle(line: string): boolean {
+    const s = normalizeGroupLine(line);
+    if (!s) return false;
+
+    if (/^(FROM|RUN|CMD|ENTRYPOINT|COPY|ADD|ARG|ENV|EXPOSE|WORKDIR)\b/i.test(s)) {
+      return true;
+    }
+    if (
+      /\b(if\s*\(|function\s*\(|while\s*\(|for\s*\(|SELECT\b|INSERT\b|UPDATE\b|DELETE\b)\b/i.test(
+        s,
+      )
+    ) {
+      return true;
+    }
+    if (
+      /^(npm|pnpm|yarn|docker|git|curl|wget|sqlite3|python|python3|pip|pip3|streamlit|mkdir|cd|touch|chmod|source)\b/i.test(
+        s,
+      )
+    ) {
+      return true;
+    }
+
+    const symbolCount = (s.match(/[{}[\]`$=<>;]/g) ?? []).length;
+    const parenCount = (s.match(/[()]/g) ?? []).length;
+    if (symbolCount >= 2) return true;
+    if (parenCount >= 2) return true;
+
+    return false;
+  }
+
+  function isLikelyParagraphFollow(line: string): boolean {
+    const s = normalizeGroupLine(line);
+    if (!s) return false;
+    if (isGroupingBoundaryLine(s)) return false;
+    const words = s.split(/\s+/).filter(Boolean);
+
+    return (
+      words.length >= 8 ||
+      /[.;,)]$/.test(s) ||
+      /\b(is|are|was|were|should|must|can|will|includes?|integrates?|contains?|provides?)\b/i.test(
+        s,
+      )
+    );
+  }
+
+  function looksLikeProseSectionTitle(line: string): boolean {
+    const s = normalizeGroupLine(line);
+    if (!s) return false;
+    if (s.length < 4 || s.length > 60) return false;
+    if (/[.?!:]$/.test(s)) return false;
+    if (/^\d+(?:\.\d+)*[.)]?\s+/.test(s)) return false;
+    if (normalizedHeadingText.has(s.toLowerCase())) return false;
+    if (isSharedLabelFamily(s) || classifyProcedureLabel(s) || classifyWorkflowLabel(s)) {
+      return false;
+    }
+    if (looksCodeLikeProseTitle(s)) return false;
+    if (looksLikeEntityLine(s)) return false;
+
+    const words = s.split(/\s+/).filter(Boolean);
+    if (words.length < 2 || words.length > 7) return false;
+    if (!/^[A-Z]/.test(s)) return false;
+    if (!/[A-Za-z]/.test(s)) return false;
+
+    const titleLike =
+      words.filter((w) => /^[A-Z][A-Za-z0-9/&()+-]*$/.test(w) || /^[-/]+$/.test(w)).length >=
+      Math.max(1, words.length - 1);
+    return titleLike;
+  }
+
+  function looksLikeListSectionLabel(line: string): boolean {
+    const s = normalizeGroupLine(line);
+    if (!s.endsWith(":")) return false;
+    const label = s.replace(/:$/, "").trim();
+    if (!label) return false;
+    if (label.length > 60) return false;
+    if (!/^[A-Z]/.test(label)) return false;
+    if (normalizedHeadingText.has(label.toLowerCase())) return false;
+    if (/^\d+(?:\.\d+)*[.)]?\s+/.test(label)) return false;
+    return true;
+  }
+
+  function escapeForRegex(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
+  function hasImmediateHtmlTableAfterLabel(labelText: string): boolean {
+    const t = labelText.trim();
+    if (!t) return false;
+
+    const escaped = escapeForRegex(t);
+    const directPattern = new RegExp(
+      `${escaped}\\s*:?\\s*</(?:p|li|h[1-6])>\\s*<table\\b`,
+      "i",
+    );
+    if (directPattern.test(html)) return true;
+
+    const lower = html.toLowerCase();
+    const token = t.toLowerCase();
+    let idx = lower.indexOf(token);
+    while (idx !== -1) {
+      const tail = lower.slice(idx + token.length, idx + token.length + 500);
+      if (/^[^<]{0,30}<\/(?:p|li|h[1-6])>\s*<table\b/i.test(tail)) {
+        return true;
+      }
+      idx = lower.indexOf(token, idx + token.length);
+    }
+
+    return false;
+  }
+
+  function stripListMarker(line: string): string {
+    return line
+      .replace(/^[-*+]\s+\[[ xX]\]\s+/, "")
+      .replace(/^[•●▪◦‣]\s+/, "")
+      .replace(/^[-*+]\s+/, "")
+      .replace(/^\d+(?:[.)])\s+/, "")
+      .trim();
+  }
+
+  function isBulletListLine(line: string): boolean {
+    const s = normalizeGroupLine(line);
+    return (
+      /^[-*+]\s+\S+/.test(s) ||
+      /^[-*+]\s+\[[ xX]\]\s+\S+/.test(s) ||
+      /^[•●▪◦‣]\s+\S+/.test(s)
+    );
+  }
+
+  function isNumberedListLine(line: string): boolean {
+    const s = normalizeGroupLine(line);
+    return /^\d+(?:[.)])\s+\S+/.test(s);
+  }
+
+  function isLikelyShortListLine(line: string): boolean {
+    const original = normalizeGroupLine(line);
+    const s = stripListMarker(original);
+    if (!s) return false;
+    if (s.length >= 80) return false;
+    if (/[.]$/.test(s)) return false;
+    if (/^#{1,6}\s+/.test(original)) return false;
+    if (/^\|.*\|$/.test(original)) return false;
+    if (looksLikeTableBoundary(original)) return false;
+    if (looksLikeCodeBoundary(original)) return false;
+    if (looksLikeDiagramBoundary(original)) return false;
+    if (isHardBoundaryLine(original)) return false;
+    if (/^(and|or|but)\b/i.test(s)) return false;
+    if (
+      /\b(this|that|these|those|is|are|was|were|should|must|can|will|could|would|may|might|contains?|includes?|provides?)\b/i.test(
+        s,
+      )
+    ) {
+      return false;
+    }
+
+    const words = s.split(/\s+/).filter(Boolean);
+    return words.length >= 1 && words.length <= 8;
+  }
+
+  function isLikelyParagraphBlockLine(line: string): boolean {
+    const s = normalizeGroupLine(line);
+    if (!s) return false;
+    if (isHardBoundaryLine(s)) return false;
+    if (looksLikeListSectionLabel(s)) return false;
+    if (isBulletListLine(s) || isNumberedListLine(s)) return false;
+    if (s.length < 20) return false;
+    return isLikelyParagraphFollow(s);
+  }
+
+  function getRoleNodesForLine(line: string): DocHierarchyNode[] {
+    return lineToHierarchy.get(normalizeGroupLine(line).toLowerCase()) ?? [];
+  }
+
+  function hasNearbyStructureAnchor(
+    lineIndex: number,
+    radius = 3,
+    includeTitle = false,
+  ): boolean {
+    const start = Math.max(0, lineIndex - radius);
+    const end = Math.min(plainLines.length - 1, lineIndex + radius);
+    for (let i = start; i <= end; i++) {
+      const text = normalizeGroupLine(plainLines[i] ?? "");
+      if (!text) continue;
+      const nodes = getRoleNodesForLine(text);
+      if (
+        nodes.some(
+          (n) =>
+            n.role === "section" ||
+            n.role === "subsection" ||
+            (includeTitle && n.role === "title"),
+        )
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function collectEntityChildIds(line: string): string[] {
+    const full = normalizeGroupLine(line).toLowerCase();
+    const stripped = stripListMarker(line).toLowerCase();
+    const entityIds = new Set<string>();
+
+    for (const key of [full, stripped]) {
+      if (!key) continue;
+      const nodes = lineToHierarchy.get(key) ?? [];
+      for (const n of nodes) {
+        if (n.role === "entity") {
+          entityIds.add(n.id);
+        }
+      }
+    }
+
+    return Array.from(entityIds);
+  }
+
+  type AttachedBlockKind =
+    | "none"
+    | "short_line_run"
+    | "bullet_list"
+    | "numbered_list"
+    | "table"
+    | "paragraph";
+
+  type AttachedBlockAnalysis = {
+    kind: AttachedBlockKind;
+    firstLine: number;
+    lastLine: number;
+    itemCount: number;
+    childNodeIds: string[];
+    exceededSpan: boolean;
+    signals: string[];
+  };
+
+  function analyzeAttachedBlock(labelIndex: number): AttachedBlockAnalysis {
+    let j = labelIndex + 1;
+    let skippedBlank = 0;
+
+    while (j < plainLines.length) {
+      const s = normalizeGroupLine(plainLines[j] ?? "");
+      if (s) break;
+      skippedBlank++;
+      if (skippedBlank > 1) {
+        return {
+          kind: "none",
+          firstLine: -1,
+          lastLine: -1,
+          itemCount: 0,
+          childNodeIds: [],
+          exceededSpan: false,
+          signals: [],
+        };
+      }
+      j++;
+    }
+
+    if (j >= plainLines.length) {
+      return {
+        kind: "none",
+        firstLine: -1,
+        lastLine: -1,
+        itemCount: 0,
+        childNodeIds: [],
+        exceededSpan: false,
+        signals: [],
+      };
+    }
+
+    const first = normalizeGroupLine(plainLines[j] ?? "");
+    const next = normalizeGroupLine(plainLines[j + 1] ?? "");
+
+    const firstIsTable = looksLikeTableBoundary(first, next);
+    if (firstIsTable) {
+      // Table is a hard grouping boundary: keep only label-level association.
+      return {
+        kind: "table",
+        firstLine: labelIndex + 1,
+        lastLine: labelIndex + 1,
+        itemCount: 1,
+        childNodeIds: [],
+        exceededSpan: false,
+        signals: ["attached_table_follow"],
+      };
+    }
+    if (isHardBoundaryLine(first, next)) {
+      return {
+        kind: "none",
+        firstLine: -1,
+        lastLine: -1,
+        itemCount: 0,
+        childNodeIds: [],
+        exceededSpan: false,
+        signals: [],
+      };
+    }
+
+    let kind: AttachedBlockKind = "none";
+    if (firstIsTable) {
+      kind = "table";
+    } else if (isBulletListLine(first)) {
+      kind = "bullet_list";
+    } else if (isNumberedListLine(first)) {
+      kind = "numbered_list";
+    } else if (isLikelyShortListLine(first)) {
+      kind = "short_line_run";
+    } else if (isLikelyParagraphBlockLine(first)) {
+      kind = "paragraph";
+    }
+
+    if (kind === "none") {
+      return {
+        kind,
+        firstLine: -1,
+        lastLine: -1,
+        itemCount: 0,
+        childNodeIds: [],
+        exceededSpan: false,
+        signals: [],
+      };
+    }
+
+    const childNodeIds = new Set<string>();
+    let firstAccepted = -1;
+    let lastAccepted = -1;
+    let itemCount = 0;
+    let exceededSpan = false;
+
+    while (j < plainLines.length) {
+      const candidate = normalizeGroupLine(plainLines[j] ?? "");
+      const nextCandidate = normalizeGroupLine(plainLines[j + 1] ?? "");
+
+      if (!candidate) {
+        if (kind === "paragraph") break;
+        const afterBlank = nextNonBlankPlainLine(plainLines, j + 1);
+        if (afterBlank && isLikelyParagraphFollow(afterBlank)) {
+          break;
+        }
+        break;
+      }
+
+      if (kind === "table") {
+        if (!looksLikeTableBoundary(candidate, nextCandidate)) break;
+      } else {
+        if (isHardBoundaryLine(candidate, nextCandidate)) break;
+        if (isGroupingBoundaryLine(candidate)) break;
+        if (looksLikeListSectionLabel(candidate)) break;
+
+        if (kind === "bullet_list") {
+          if (!isBulletListLine(candidate) || !isLikelyShortListLine(candidate)) break;
+        } else if (kind === "numbered_list") {
+          if (!isNumberedListLine(candidate) || !isLikelyShortListLine(candidate)) break;
+        } else if (kind === "short_line_run") {
+          if (!isLikelyShortListLine(candidate)) break;
+        } else if (kind === "paragraph") {
+          if (!isLikelyParagraphBlockLine(candidate)) break;
+        }
+      }
+
+      const lineNumber = j + 1;
+      if (firstAccepted === -1) firstAccepted = lineNumber;
+      if (lineNumber - firstAccepted + 1 > MAX_GROUP_SPAN) {
+        exceededSpan = true;
+        break;
+      }
+
+      for (const id of collectEntityChildIds(candidate)) {
+        childNodeIds.add(id);
+      }
+
+      itemCount++;
+      lastAccepted = lineNumber;
+      j++;
+    }
+
+    if (kind === "short_line_run" && itemCount < 2) kind = "none";
+    if (kind === "bullet_list" && itemCount < 2) kind = "none";
+    if (kind === "numbered_list" && itemCount < 2) kind = "none";
+    if (kind === "table" && itemCount < 2) kind = "none";
+    if (kind === "paragraph" && itemCount < 1) kind = "none";
+
+    const signals: string[] = [];
+    if (kind !== "none") {
+      if (skippedBlank > 0) signals.push("label_gap");
+      signals.push(`attached_${kind}`);
+    }
+
+    return {
+      kind,
+      firstLine: firstAccepted,
+      lastLine: lastAccepted,
+      itemCount,
+      childNodeIds: Array.from(childNodeIds),
+      exceededSpan,
+      signals,
+    };
+  }
+
+  function isSectionAlreadySolved(
+    labelIndex: number,
+    labelText: string,
+    blockKind: AttachedBlockKind,
+    itemCount: number,
+    parentId?: string,
+  ): boolean {
+    const nearbyAnchor = hasNearbyStructureAnchor(labelIndex, 4, false);
+    const parentNode = parentId ? idToHierarchy.get(parentId) : undefined;
+    const parentStructured = parentNode?.role === "section" || parentNode?.role === "subsection";
+    if (!nearbyAnchor && !parentStructured) return false;
+
+    const labelCore = labelText.trim().replace(/:$/, "");
+    const proceduralLabel =
+      classifyProcedureLabel(labelCore) !== null || /^workflow$/i.test(labelCore) || /^steps?$/i.test(labelCore);
+
+    if (blockKind === "table" || blockKind === "paragraph") return true;
+    if (proceduralLabel && (blockKind === "bullet_list" || blockKind === "numbered_list")) {
+      return false;
+    }
+
+    return itemCount <= 4;
+  }
+
+  let groupCounter = 0;
+  function makeGroupId(kind: DocStructuralGroup["kind"]): string {
+    groupCounter += 1;
+    return `${kind}-${groupCounter}`;
+  }
+
+  const seenGroups = new Set<string>();
+  function pushGroup(group: DocStructuralGroup) {
+    const key = `${group.kind}|${group.title?.trim().toLowerCase() ?? ""}|${group.parentId ?? "root"}|${group.startLine ?? -1}`;
+    if (seenGroups.has(key)) return;
+    seenGroups.add(key);
+    groups.push(group);
+  }
+
+  let currentGroupParentId = rootParentId;
+  let lastStructuralAnchorLine = -1;
+
+  for (let i = 0; i < plainLines.length; i++) {
+    const raw = plainLines[i] ?? "";
+    const line = normalizeGroupLine(raw);
+    if (!line) continue;
+
+    const matched = lineToHierarchy.get(line.toLowerCase()) ?? [];
+    const parentCandidate =
+      matched.find((n) => n.role === "subsection") ??
+      matched.find((n) => n.role === "section") ??
+      matched.find((n) => n.role === "title");
+    if (parentCandidate) {
+      currentGroupParentId = parentCandidate.id;
+      lastStructuralAnchorLine = i;
+    }
+
+    if (looksLikeListSectionLabel(line)) {
+      const labelText = line.replace(/:$/, "").trim();
+      if (!documentStructureWeak) continue;
+
+      const nearbyHierarchyAnchor = hasNearbyStructureAnchor(i, 3, false);
+      const anchorRecencyMissing = lastStructuralAnchorLine < 0 || i - lastStructuralAnchorLine > 5;
+      const localHierarchyMissing = !nearbyHierarchyAnchor && anchorRecencyMissing;
+
+      if (hasImmediateHtmlTableAfterLabel(labelText)) {
+        if (
+          isSectionAlreadySolved(
+            i,
+            labelText,
+            "table",
+            1,
+            currentGroupParentId,
+          )
+        ) {
+          continue;
+        }
+
+        const tableSignals = ["label_colon", "attached_table_follow", "doc_structure_weak"];
+        if (localHierarchyMissing) {
+          tableSignals.push("local_hierarchy_missing");
+        }
+
+        pushGroup({
+          id: makeGroupId("list_section"),
+          kind: "list_section",
+          title: labelText,
+          parentId: currentGroupParentId,
+          startLine: i + 1,
+          endLine: i + 1,
+          confidence: 0.74,
+          signals: tableSignals,
+        });
+        continue;
+      }
+
+      const block = analyzeAttachedBlock(i);
+      if (block.kind === "none" || block.exceededSpan) continue;
+      if (block.firstLine === -1 || block.lastLine === -1) continue;
+
+      if (
+        isSectionAlreadySolved(
+          i,
+          labelText,
+          block.kind,
+          block.itemCount,
+          currentGroupParentId,
+        )
+      ) {
+        continue;
+      }
+
+      let confidence = 0.78;
+      if (block.kind === "table") confidence = 0.74;
+      if (block.kind === "paragraph") confidence = 0.66;
+
+      const signals = ["label_colon", ...block.signals];
+      if (localHierarchyMissing) {
+        signals.push("local_hierarchy_missing");
+      }
+      signals.push("doc_structure_weak");
+
+      pushGroup({
+        id: makeGroupId("list_section"),
+        kind: "list_section",
+        title: labelText,
+        parentId: currentGroupParentId,
+        childNodeIds: block.childNodeIds.length > 0 ? block.childNodeIds : undefined,
+        startLine: i + 1,
+        endLine: block.lastLine,
+        confidence,
+        signals,
+      });
+    }
+
+    if (looksLikeProseSectionTitle(line)) {
+      if (!documentStructureWeak) continue;
+
+      const prevRaw = normalizeGroupLine(plainLines[i - 1] ?? "");
+      const nextRaw = normalizeGroupLine(plainLines[i + 1] ?? "");
+      const prevBoundary = !prevRaw || isGroupingBoundaryLine(prevRaw);
+      const nextBoundary = !nextRaw || isGroupingBoundaryLine(nextRaw);
+
+      if (!prevBoundary || !nextBoundary) continue;
+
+      const follow = nextNonBlankPlainLine(plainLines, i + 1);
+      if (!follow) continue;
+      if (!isLikelyParagraphFollow(follow) && !isLikelyShortListLine(follow) && !/^\|.*\|$/.test(follow)) {
+        continue;
+      }
+
+      pushGroup({
+        id: makeGroupId("prose_section"),
+        kind: "prose_section",
+        title: line,
+        parentId: currentGroupParentId,
+        startLine: i + 1,
+        endLine: i + 1,
+        confidence: 0.72,
+        signals: ["title_case_line", "paragraph_follow"],
+      });
+    }
+  }
+
   const stats: DocStats = {
     headings: headings.length,
     codeBlocks: codeBlocks.filter((b) => b.kind === "code").length,
@@ -748,6 +1466,7 @@ export function extractDocIntelligence(params: {
     lists,
     roadmaps,
     workflows,
+    groups,
     hierarchy,
     titleBlock,
     summary,
