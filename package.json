@@ -7,7 +7,8 @@
     "dev:3002": "next dev -p 3002",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "benchmark:run": "tsx scripts/run-benchmark.ts"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",
@@ -36,6 +37,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
     "tailwindcss": "^4",
+    "tsx": "^4.20.6",
     "typescript": "^5"
   }
 }

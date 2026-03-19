@@ -48,6 +48,27 @@ npm run lint
 npm run build
 ```
 
+## Benchmark Runner
+Run the benchmark suite across `benchmark_docs/*` and generate reports:
+
+```powershell
+npm run benchmark:run
+```
+
+Optional args:
+
+```powershell
+npm run benchmark:run -- --docs benchmark_docs --out benchmark_results
+```
+
+Generated outputs:
+- `benchmark_results/results.json`
+- `benchmark_results/summary.md`
+- `benchmark_results/suspicious_cases.md`
+- `benchmark_results/per_doc/*.json`
+
+The benchmark output is duplication-aware (exact + near-duplicate grouping, unique-content metrics, and diversity-adjusted score interpretation).
+
 ## Notes
 - PDF output is generated server-side via `/api/pdf`.
 - Mermaid diagrams are rendered before PDF generation.

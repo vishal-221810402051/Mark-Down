@@ -986,6 +986,21 @@ export function extractDocIntelligence(params: {
     return false;
   }
 
+  function hasNearbyHtmlTableAfterLabel(labelText: string): boolean {
+    const t = labelText.trim();
+    if (!t) return false;
+
+    const lower = html.toLowerCase();
+    const token = t.toLowerCase();
+    let idx = lower.indexOf(token);
+    while (idx !== -1) {
+      const tail = lower.slice(idx + token.length, idx + token.length + 1200);
+      if (tail.includes("<table")) return true;
+      idx = lower.indexOf(token, idx + token.length);
+    }
+    return false;
+  }
+
   function stripListMarker(line: string): string {
     return line
       .replace(/^[-*+]\s+\[[ xX]\]\s+/, "")
@@ -1371,6 +1386,39 @@ export function extractDocIntelligence(params: {
       if (block.kind === "none" || block.exceededSpan) continue;
       if (block.firstLine === -1 || block.lastLine === -1) continue;
 
+      const spanStart = i + 1;
+      let spanEnd = block.lastLine;
+
+      // Keep paragraph-attached list sections tightly scoped to the first
+      // attached paragraph line so the span cannot bleed into later blocks.
+      if (block.kind === "paragraph") {
+        spanEnd = Math.max(spanStart, block.firstLine);
+
+        // If a table follows this label region, keep the grouping as label-only.
+        // HTML-to-text flattening can blur paragraph/table boundaries in line indices.
+        if (hasNearbyHtmlTableAfterLabel(labelText)) {
+          spanEnd = spanStart;
+        }
+      }
+
+      // Hard stop: list_section span must never include table-style lines.
+      while (spanEnd > spanStart) {
+        const tail = normalizeGroupLine(plainLines[spanEnd - 1] ?? "");
+        const tailNext = normalizeGroupLine(plainLines[spanEnd] ?? "");
+        if (
+          looksLikeTableBoundary(tail, tailNext) ||
+          /^\|/.test(tail) ||
+          /^<table\b/i.test(tail)
+        ) {
+          spanEnd -= 1;
+          continue;
+        }
+        break;
+      }
+
+      if (spanEnd < spanStart) continue;
+      if (spanEnd - spanStart + 1 > MAX_GROUP_SPAN) continue;
+
       if (
         isSectionAlreadySolved(
           i,
@@ -1399,8 +1447,8 @@ export function extractDocIntelligence(params: {
         title: labelText,
         parentId: currentGroupParentId,
         childNodeIds: block.childNodeIds.length > 0 ? block.childNodeIds : undefined,
-        startLine: i + 1,
-        endLine: block.lastLine,
+        startLine: spanStart,
+        endLine: spanEnd,
         confidence,
         signals,
       });

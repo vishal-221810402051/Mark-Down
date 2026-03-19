@@ -41,3 +41,30 @@ yarn-error.log*
 next-env.d.ts
 .tmp_norm/
 src/app/api/debug/
+benchmark_results/
+.tmp-start-*.log
+
+# ===== Benchmark Temporary Files =====
+tmp_diversity_benchmark_input/
+.tmp_diversity_benchmark_input/
+
+# ===== Benchmark Results =====
+benchmark_results/
+
+# ===== Evaluation Artifacts =====
+benchmark_docs/evaluation_sheet.csv
+
+# ===== Optional: logs / temp =====
+*.log
+*.tmp
+
+# ===== Node / build =====
+node_modules/
+dist/
+build/
+
+# ===== OS / editor junk =====
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/settings.json
