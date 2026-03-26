@@ -1,3 +1,4 @@
+import Image from "next/image";
 import type { ReactNode } from "react";
 
 type Props = {
@@ -55,10 +56,18 @@ export default function TopBar({
     <header className="sticky top-0 z-10 border-b border-white/10 bg-gradient-to-r from-slate-950/80 to-slate-900/80 backdrop-blur-2xl">
       <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4">
         <div className="flex items-center gap-3">
-          <div className="h-8 w-8 rounded-2xl bg-white/10 ring-1 ring-white/15 shadow-[0_10px_30px_rgba(0,0,0,0.35)]" />
+          <div className="h-8 w-8 overflow-hidden rounded-full bg-white/10 ring-1 ring-white/15 shadow-[0_10px_30px_rgba(0,0,0,0.35)]">
+            <Image
+              src="/logo.jpeg"
+              alt="Mark-Down logo"
+              width={32}
+              height={32}
+              className="h-full w-full object-cover"
+            />
+          </div>
           <div className="leading-tight">
             <div className="text-sm font-semibold text-white">Mark-Down</div>
-            <div className="text-xs text-white/60">ChatGPT doc -&gt; PDF</div>
+            <div className="text-xs text-white/60">Structured Docs to PDF</div>
           </div>
 
           {statusText ? (

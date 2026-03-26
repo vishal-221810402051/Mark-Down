@@ -68,3 +68,11 @@ build/
 Thumbs.db
 .vscode/*
 !.vscode/settings.json
+
+# temp debug validation files
+.tmp_*.ts
+.tmp_*.js
+.tmp_*.md
+
+# optional local test artifacts
+tests/tmp/

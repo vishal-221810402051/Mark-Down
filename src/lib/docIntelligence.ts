@@ -1309,6 +1309,123 @@ export function extractDocIntelligence(params: {
     };
   }
 
+  function analyzeAttachedProcedureBlock(labelIndex: number): AttachedBlockAnalysis {
+    const primary = analyzeAttachedBlock(labelIndex);
+    const primaryValid =
+      primary.kind === "numbered_list" ||
+      primary.kind === "bullet_list" ||
+      (primary.kind === "short_line_run" && primary.itemCount >= 2);
+    if (primaryValid) {
+      return primary;
+    }
+
+    // Fallback for HTML-flattened lists: items may appear as short lines
+    // separated by single blank lines after heading/label anchors.
+    let j = labelIndex + 1;
+    let skippedBlank = 0;
+    while (j < plainLines.length) {
+      const s = normalizeGroupLine(plainLines[j] ?? "");
+      if (s) break;
+      skippedBlank++;
+      if (skippedBlank > 1) return primary;
+      j++;
+    }
+    if (j >= plainLines.length) return primary;
+
+    const first = normalizeGroupLine(plainLines[j] ?? "");
+    const next = normalizeGroupLine(plainLines[j + 1] ?? "");
+    if (
+      !first ||
+      isHardBoundaryLine(first, next) ||
+      isGroupingBoundaryLine(first) ||
+      looksLikeListSectionLabel(first) ||
+      classifyProcedureLabel(first) !== null ||
+      classifyWorkflowLabel(first) ||
+      !isLikelyShortListLine(first)
+    ) {
+      return primary;
+    }
+
+    let firstAccepted = -1;
+    let lastAccepted = -1;
+    let itemCount = 0;
+    let exceededSpan = false;
+    const childNodeIds = new Set<string>();
+
+    while (j < plainLines.length) {
+      const candidate = normalizeGroupLine(plainLines[j] ?? "");
+      const nextCandidate = normalizeGroupLine(plainLines[j + 1] ?? "");
+
+      if (!candidate) {
+        let k = j + 1;
+        while (k < plainLines.length && !normalizeGroupLine(plainLines[k] ?? "")) {
+          k++;
+        }
+        if (k >= plainLines.length) break;
+
+        const resumed = normalizeGroupLine(plainLines[k] ?? "");
+        const resumedNext = normalizeGroupLine(plainLines[k + 1] ?? "");
+        if (
+          !resumed ||
+          isHardBoundaryLine(resumed, resumedNext) ||
+          isGroupingBoundaryLine(resumed) ||
+          looksLikeListSectionLabel(resumed) ||
+          classifyProcedureLabel(resumed) !== null ||
+          classifyWorkflowLabel(resumed) ||
+          !isLikelyShortListLine(resumed)
+        ) {
+          break;
+        }
+
+        j = k;
+        continue;
+      }
+
+      if (
+        isHardBoundaryLine(candidate, nextCandidate) ||
+        isGroupingBoundaryLine(candidate) ||
+        looksLikeListSectionLabel(candidate) ||
+        classifyProcedureLabel(candidate) !== null ||
+        classifyWorkflowLabel(candidate) ||
+        !isLikelyShortListLine(candidate)
+      ) {
+        break;
+      }
+
+      const lineNumber = j + 1;
+      if (firstAccepted === -1) firstAccepted = lineNumber;
+      if (lineNumber - firstAccepted + 1 > MAX_GROUP_SPAN) {
+        exceededSpan = true;
+        break;
+      }
+
+      for (const id of collectEntityChildIds(candidate)) {
+        childNodeIds.add(id);
+      }
+
+      itemCount++;
+      lastAccepted = lineNumber;
+      j++;
+    }
+
+    if (itemCount < 2) return primary;
+
+    const signals = ["attached_short_line_run", "html_flattened_list_gap"];
+    if (skippedBlank > 0) {
+      signals.unshift("label_gap");
+    }
+
+    return {
+      kind: "short_line_run",
+      firstLine: firstAccepted,
+      lastLine: lastAccepted,
+      itemCount,
+      childNodeIds: Array.from(childNodeIds),
+      exceededSpan,
+      signals,
+    };
+  }
+
   function isSectionAlreadySolved(
     labelIndex: number,
     labelText: string,
@@ -1352,12 +1469,19 @@ export function extractDocIntelligence(params: {
     labelText: string,
     parentId: string | undefined,
     localHierarchyMissing: boolean,
+    options?: {
+      requireStrongListEvidence?: boolean;
+      isHeadingAnchor?: boolean;
+    },
   ): boolean {
-    const procedureBlock = analyzeAttachedBlock(lineIndex);
-    const procedureAttachKindValid =
-      procedureBlock.kind === "numbered_list" ||
-      procedureBlock.kind === "bullet_list" ||
-      procedureBlock.kind === "short_line_run";
+    const procedureBlock = analyzeAttachedProcedureBlock(lineIndex);
+    const requireStrongListEvidence = options?.requireStrongListEvidence === true;
+    const procedureAttachKindValid = requireStrongListEvidence
+      ? procedureBlock.kind === "numbered_list" ||
+        procedureBlock.kind === "bullet_list"
+      : procedureBlock.kind === "numbered_list" ||
+        procedureBlock.kind === "bullet_list" ||
+        procedureBlock.kind === "short_line_run";
 
     if (
       !procedureAttachKindValid ||
@@ -1370,17 +1494,24 @@ export function extractDocIntelligence(params: {
     }
 
     const spanStart = Math.max(1, lineIndex + 1 - tocLineOffset);
-    // Keep procedure blocks line-anchored for safety: the detection relies on
-    // attached-block evidence, but span metadata stays local to the label line.
-    // This avoids HTML/TOC flattening drift that can misalign long spans.
-    const spanEnd = spanStart;
+    const spanEnd = Math.max(
+      spanStart,
+      (procedureBlock.lastLine > 0 ? procedureBlock.lastLine : lineIndex + 1) - tocLineOffset,
+    );
 
-    if (spanEnd < spanStart || spanEnd - spanStart + 1 > MAX_GROUP_SPAN) {
+    const spanLength = spanEnd - spanStart + 1;
+    const effectiveSpan = procedureBlock.itemCount + 1;
+    if (
+      spanEnd < spanStart ||
+      (spanLength > MAX_GROUP_SPAN && effectiveSpan > MAX_GROUP_SPAN)
+    ) {
       return false;
     }
 
     const weakProcedureEvidence =
-      procedureBlock.kind === "short_line_run" && procedureBlock.itemCount <= 2;
+      !requireStrongListEvidence &&
+      procedureBlock.kind === "short_line_run" &&
+      procedureBlock.itemCount <= 2;
     const solved = isSectionAlreadySolved(
       lineIndex,
       labelText,
@@ -1394,10 +1525,16 @@ export function extractDocIntelligence(params: {
     }
 
     const procedureSignals = ["procedure_label", ...procedureBlock.signals];
+    procedureSignals.push(`item_count_${procedureBlock.itemCount}`);
+    if (options?.isHeadingAnchor) {
+      procedureSignals.push("heading_anchor");
+    }
     if (localHierarchyMissing) {
       procedureSignals.push("local_hierarchy_missing");
     }
-    procedureSignals.push("doc_structure_weak");
+    if (documentStructureWeak) {
+      procedureSignals.push("doc_structure_weak");
+    }
 
     let confidence = 0.8;
     if (procedureBlock.kind === "short_line_run") confidence = 0.76;
@@ -1415,6 +1552,145 @@ export function extractDocIntelligence(params: {
       endLine: spanEnd,
       confidence,
       signals: procedureSignals,
+    });
+
+    return true;
+  }
+
+  function analyzePhaseLine(textLine: string): {
+    title: string;
+    descriptive: boolean;
+    roadmapDetected: boolean;
+  } | null {
+    const title = textLine.trim().replace(/:$/, "").trim();
+    if (!title) return null;
+
+    // Do not treat plain numeric list items as phase signals.
+    if (/^\d+(?:[.)])\s+/.test(title)) return null;
+
+    const roadmapKind = classifyRoadmap(title);
+    const roadmapPhaseLike =
+      roadmapKind === "phase" ||
+      roadmapKind === "step" ||
+      roadmapKind === "plan" ||
+      roadmapKind === "roadmap";
+    const phaseLike = /^(phase|stage|step|iteration)\s+(?:\d+|[ivx]+)\b/i.test(title);
+    if (!roadmapPhaseLike && !phaseLike) return null;
+
+    const descriptive =
+      /^(phase|stage|step|iteration)\s+(?:\d+|[ivx]+)\s*[-–—:]\s*\S.+$/i.test(
+        title,
+      ) ||
+      (/^(phase|stage|step|iteration)\s+(?:\d+|[ivx]+)\b/i.test(title) &&
+        title.split(/\s+/).filter(Boolean).length >= 3);
+
+    return {
+      title,
+      descriptive,
+      roadmapDetected: roadmapPhaseLike || phaseLike,
+    };
+  }
+
+  function hasStrongPhaseHeading(phaseTitle: string): boolean {
+    const strippedPhase = stripSectionNumber(phaseTitle).toLowerCase();
+
+    return hierarchy.some(
+      (n) =>
+        (n.role === "section" || n.role === "subsection") &&
+        stripSectionNumber(n.text).toLowerCase() === strippedPhase,
+    );
+  }
+
+  function tryEmitPhaseBlock(
+    lineIndex: number,
+    lineText: string,
+    parentId: string | undefined,
+    localHierarchyMissing: boolean,
+  ): boolean {
+    const phase = analyzePhaseLine(lineText);
+    if (!phase) return false;
+
+    // If the phase is already represented as a strong section/subsection,
+    // do not emit a redundant structural group.
+    if (hasStrongPhaseHeading(phase.title)) {
+      return false;
+    }
+
+    const block = analyzeAttachedBlock(lineIndex);
+    const attachedValid =
+      (block.kind === "paragraph" ||
+        block.kind === "numbered_list" ||
+        block.kind === "bullet_list" ||
+        block.kind === "short_line_run") &&
+      !block.exceededSpan &&
+      block.firstLine !== -1 &&
+      block.lastLine !== -1;
+
+    // Minimum evidence:
+    // - attached block evidence OR
+    // - descriptive phase line content.
+    if (!attachedValid && !phase.descriptive) {
+      return false;
+    }
+
+    const weakPhaseEvidence =
+      !phase.descriptive &&
+      (!attachedValid ||
+        (block.kind === "short_line_run" && block.itemCount <= 2));
+
+    if (
+      attachedValid &&
+      isSectionAlreadySolved(
+        lineIndex,
+        phase.title,
+        block.kind,
+        block.itemCount,
+        parentId,
+      ) &&
+      weakPhaseEvidence
+    ) {
+      return false;
+    }
+
+    const spanStart = Math.max(1, lineIndex + 1 - tocLineOffset);
+    // Keep phase blocks label-anchored for safety; evidence comes from the
+    // attached-block analysis while span metadata remains local.
+    const spanEnd = spanStart;
+
+    if (spanEnd < spanStart || spanEnd - spanStart + 1 > MAX_GROUP_SPAN) {
+      return false;
+    }
+
+    const signals = ["phase_label", "roadmap_detected"];
+    if (attachedValid) {
+      signals.push(...block.signals);
+    }
+    if (phase.descriptive) {
+      signals.push("descriptive_phase_line");
+    }
+    if (localHierarchyMissing) {
+      signals.push("local_hierarchy_missing");
+    }
+    if (documentStructureWeak) {
+      signals.push("doc_structure_weak");
+    }
+
+    let confidence = 0.8;
+    if (phase.descriptive) confidence = 0.84;
+    if (attachedValid && (block.kind === "numbered_list" || block.kind === "bullet_list")) {
+      confidence = Math.max(confidence, 0.86);
+    }
+
+    pushGroup({
+      id: makeGroupId("phase_block"),
+      kind: "phase_block",
+      title: phase.title,
+      parentId,
+      childNodeIds: attachedValid && block.childNodeIds.length > 0 ? block.childNodeIds : undefined,
+      startLine: spanStart,
+      endLine: spanEnd,
+      confidence,
+      signals,
     });
 
     return true;
@@ -1438,11 +1714,47 @@ export function extractDocIntelligence(params: {
       lastStructuralAnchorLine = i;
     }
 
-    if (documentStructureWeak) {
-      const plainProcedureLabel = line.replace(/:$/, "").trim();
+    {
+      const nearbyHierarchyAnchor = hasNearbyStructureAnchor(i, 3, false);
+      const anchorRecencyMissing =
+        lastStructuralAnchorLine < 0 || i - lastStructuralAnchorLine > 5;
+      const localHierarchyMissing =
+        !nearbyHierarchyAnchor && anchorRecencyMissing;
+
+      if (
+        tryEmitPhaseBlock(
+          i,
+          line,
+          currentGroupParentId,
+          localHierarchyMissing,
+        )
+      ) {
+        continue;
+      }
+    }
+
+    {
+      const plainProcedureLabelRaw = line.replace(/:$/, "").trim();
+      const plainProcedureLabel = stripSectionNumber(plainProcedureLabelRaw).trim();
+
       const isProcedureLabel =
         classifyProcedureLabel(plainProcedureLabel) !== null ||
         classifyWorkflowLabel(plainProcedureLabel);
+
+      const headingProcedureAnchor = matched.some((n) => {
+        if (
+          n.role !== "section" &&
+          n.role !== "subsection" &&
+          n.role !== "label"
+        ) {
+          return false;
+        }
+        const headingText = stripSectionNumber(n.text).trim();
+        return (
+          classifyProcedureLabel(headingText) !== null ||
+          classifyWorkflowLabel(headingText)
+        );
+      });
 
       if (isProcedureLabel) {
         const nearbyHierarchyAnchor = hasNearbyStructureAnchor(i, 3, false);
@@ -1451,12 +1763,25 @@ export function extractDocIntelligence(params: {
         const localHierarchyMissing =
           !nearbyHierarchyAnchor && anchorRecencyMissing;
 
+        const attached = analyzeAttachedProcedureBlock(i);
+        const strongAttachedEvidence =
+          (attached.kind === "numbered_list" ||
+            attached.kind === "bullet_list" ||
+            attached.kind === "short_line_run") &&
+          !attached.exceededSpan &&
+          attached.itemCount >= 2;
+
         if (
+          (documentStructureWeak || headingProcedureAnchor || strongAttachedEvidence) &&
           tryEmitProcedureBlock(
             i,
             plainProcedureLabel,
             currentGroupParentId,
             localHierarchyMissing,
+            {
+              requireStrongListEvidence: headingProcedureAnchor,
+              isHeadingAnchor: headingProcedureAnchor,
+            },
           )
         ) {
           continue;
@@ -1503,7 +1828,7 @@ export function extractDocIntelligence(params: {
         continue;
       }
 
-      const block = analyzeAttachedBlock(i);
+      const block = analyzeAttachedProcedureBlock(i);
       if (block.kind === "none" || block.exceededSpan) continue;
       if (block.firstLine === -1 || block.lastLine === -1) continue;
 
@@ -1601,6 +1926,55 @@ export function extractDocIntelligence(params: {
         confidence: 0.72,
         signals: ["title_case_line", "paragraph_follow"],
       });
+    }
+  }
+
+  // Strengthen procedure extraction for heading-promoted anchors (e.g. Steps, Checklist, Workflow).
+  // This keeps the `procedures` array aligned with grouped procedure evidence.
+  {
+    const existingByTitle = new Map<string, number>();
+    for (let i = 0; i < procedures.length; i++) {
+      const key = procedures[i].title.trim().toLowerCase();
+      if (!existingByTitle.has(key)) {
+        existingByTitle.set(key, i);
+      }
+    }
+
+    for (let i = 0; i < plainLines.length; i++) {
+      const line = normalizeGroupLine(plainLines[i] ?? "");
+      if (!line) continue;
+
+      const core = stripSectionNumber(line.replace(/:$/, "")).trim();
+      if (!core) continue;
+
+      const procedureKind =
+        classifyProcedureLabel(core) ??
+        (/^workflow$/i.test(core) ? "workflow" : null);
+      if (!procedureKind) continue;
+
+      const block = analyzeAttachedProcedureBlock(i);
+      const validAttached =
+        (block.kind === "numbered_list" ||
+          block.kind === "bullet_list" ||
+          block.kind === "short_line_run") &&
+        !block.exceededSpan &&
+        block.itemCount >= 2;
+      if (!validAttached) continue;
+
+      const titleKey = core.toLowerCase();
+      const existingIndex = existingByTitle.get(titleKey);
+      if (existingIndex !== undefined) {
+        if (procedures[existingIndex].itemCount < block.itemCount) {
+          procedures[existingIndex].itemCount = block.itemCount;
+        }
+      } else {
+        procedures.push({
+          kind: procedureKind,
+          title: core,
+          itemCount: block.itemCount,
+        });
+        existingByTitle.set(titleKey, procedures.length - 1);
+      }
     }
   }
 
