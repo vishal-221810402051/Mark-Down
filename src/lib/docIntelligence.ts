@@ -762,6 +762,28 @@ export function extractDocIntelligence(params: {
   const sectionNodeCount = hierarchy.filter((n) => n.role === "section").length;
   const documentStructureWeak = headings.length < 3 && sectionNodeCount < 2;
   const MAX_GROUP_SPAN = 10;
+  const tocLineOffset = (() => {
+    const tocMatch =
+      html.match(/^\s*<section class="toc"[\s\S]*?<\/section>/i) ??
+      html.match(/^\s*<nav class="toc"[\s\S]*?<\/nav>/i);
+    if (!tocMatch) return 0;
+    const tocText = tocMatch[0]
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<\/(p|div|section|article|h[1-6]|li|pre)\s*>/gi, "\n")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/&nbsp;/gi, " ")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&amp;/g, "&")
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/\u00A0/g, " ")
+      .replace(/[ \t]+\n/g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+    if (!tocText) return 0;
+    return tocText.replace(/\r\n/g, "\n").split("\n").length;
+  })();
 
   function normalizeGroupLine(value: string): string {
     return value.trim().replace(/\s+/g, " ");
@@ -1325,6 +1347,79 @@ export function extractDocIntelligence(params: {
     groups.push(group);
   }
 
+  function tryEmitProcedureBlock(
+    lineIndex: number,
+    labelText: string,
+    parentId: string | undefined,
+    localHierarchyMissing: boolean,
+  ): boolean {
+    const procedureBlock = analyzeAttachedBlock(lineIndex);
+    const procedureAttachKindValid =
+      procedureBlock.kind === "numbered_list" ||
+      procedureBlock.kind === "bullet_list" ||
+      procedureBlock.kind === "short_line_run";
+
+    if (
+      !procedureAttachKindValid ||
+      procedureBlock.exceededSpan ||
+      procedureBlock.itemCount < 2 ||
+      procedureBlock.firstLine === -1 ||
+      procedureBlock.lastLine === -1
+    ) {
+      return false;
+    }
+
+    const spanStart = Math.max(1, lineIndex + 1 - tocLineOffset);
+    // Keep procedure blocks line-anchored for safety: the detection relies on
+    // attached-block evidence, but span metadata stays local to the label line.
+    // This avoids HTML/TOC flattening drift that can misalign long spans.
+    const spanEnd = spanStart;
+
+    if (spanEnd < spanStart || spanEnd - spanStart + 1 > MAX_GROUP_SPAN) {
+      return false;
+    }
+
+    const weakProcedureEvidence =
+      procedureBlock.kind === "short_line_run" && procedureBlock.itemCount <= 2;
+    const solved = isSectionAlreadySolved(
+      lineIndex,
+      labelText,
+      procedureBlock.kind,
+      procedureBlock.itemCount,
+      parentId,
+    );
+
+    if (solved && weakProcedureEvidence) {
+      return false;
+    }
+
+    const procedureSignals = ["procedure_label", ...procedureBlock.signals];
+    if (localHierarchyMissing) {
+      procedureSignals.push("local_hierarchy_missing");
+    }
+    procedureSignals.push("doc_structure_weak");
+
+    let confidence = 0.8;
+    if (procedureBlock.kind === "short_line_run") confidence = 0.76;
+
+    pushGroup({
+      id: makeGroupId("procedure_block"),
+      kind: "procedure_block",
+      title: labelText,
+      parentId,
+      childNodeIds:
+        procedureBlock.childNodeIds.length > 0
+          ? procedureBlock.childNodeIds
+          : undefined,
+      startLine: spanStart,
+      endLine: spanEnd,
+      confidence,
+      signals: procedureSignals,
+    });
+
+    return true;
+  }
+
   let currentGroupParentId = rootParentId;
   let lastStructuralAnchorLine = -1;
 
@@ -1341,6 +1436,32 @@ export function extractDocIntelligence(params: {
     if (parentCandidate) {
       currentGroupParentId = parentCandidate.id;
       lastStructuralAnchorLine = i;
+    }
+
+    if (documentStructureWeak) {
+      const plainProcedureLabel = line.replace(/:$/, "").trim();
+      const isProcedureLabel =
+        classifyProcedureLabel(plainProcedureLabel) !== null ||
+        classifyWorkflowLabel(plainProcedureLabel);
+
+      if (isProcedureLabel) {
+        const nearbyHierarchyAnchor = hasNearbyStructureAnchor(i, 3, false);
+        const anchorRecencyMissing =
+          lastStructuralAnchorLine < 0 || i - lastStructuralAnchorLine > 5;
+        const localHierarchyMissing =
+          !nearbyHierarchyAnchor && anchorRecencyMissing;
+
+        if (
+          tryEmitProcedureBlock(
+            i,
+            plainProcedureLabel,
+            currentGroupParentId,
+            localHierarchyMissing,
+          )
+        ) {
+          continue;
+        }
+      }
     }
 
     if (looksLikeListSectionLabel(line)) {
