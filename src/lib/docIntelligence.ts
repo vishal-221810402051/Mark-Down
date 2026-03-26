@@ -1144,7 +1144,114 @@ export function extractDocIntelligence(params: {
     childNodeIds: string[];
     exceededSpan: boolean;
     signals: string[];
+    secondaryBlockKind: AttachedBlockKind;
+    blockSequencePattern:
+      | "none"
+      | "label_paragraph_table"
+      | "label_paragraph_list"
+      | "list_paragraph";
   };
+
+  function clampGroupConfidence(value: number): number {
+    return Math.max(0.5, Math.min(0.95, value));
+  }
+
+  function isListBlockKind(kind: AttachedBlockKind): boolean {
+    return kind === "short_line_run" || kind === "bullet_list" || kind === "numbered_list";
+  }
+
+  function classifySecondaryBlockKind(
+    startIndex: number,
+  ): { kind: AttachedBlockKind; lineIndex: number } {
+    let j = startIndex;
+    let skippedBlank = 0;
+
+    while (j < plainLines.length) {
+      const s = normalizeGroupLine(plainLines[j] ?? "");
+      if (s) break;
+      skippedBlank++;
+      if (skippedBlank > 1) {
+        return { kind: "none", lineIndex: -1 };
+      }
+      j++;
+    }
+
+    if (j >= plainLines.length) return { kind: "none", lineIndex: -1 };
+
+    const first = normalizeGroupLine(plainLines[j] ?? "");
+    const next = normalizeGroupLine(plainLines[j + 1] ?? "");
+    if (!first || isHardBoundaryLine(first, next)) {
+      return { kind: "none", lineIndex: -1 };
+    }
+    if (looksLikeTableBoundary(first, next)) {
+      return { kind: "table", lineIndex: j };
+    }
+    if (isBulletListLine(first)) {
+      return { kind: "bullet_list", lineIndex: j };
+    }
+    if (isNumberedListLine(first)) {
+      return { kind: "numbered_list", lineIndex: j };
+    }
+    if (isLikelyShortListLine(first)) {
+      return { kind: "short_line_run", lineIndex: j };
+    }
+    if (isLikelyParagraphBlockLine(first)) {
+      return { kind: "paragraph", lineIndex: j };
+    }
+    return { kind: "none", lineIndex: -1 };
+  }
+
+  function withAdjacencySignals(
+    labelIndex: number,
+    analysis: AttachedBlockAnalysis,
+  ): AttachedBlockAnalysis {
+    if (analysis.kind === "none") {
+      return {
+        ...analysis,
+        secondaryBlockKind: "none",
+        blockSequencePattern: "none",
+      };
+    }
+
+    const scanStart = Math.max(
+      labelIndex + 1,
+      analysis.lastLine > 0 ? analysis.lastLine : labelIndex + 1,
+    );
+    const secondary = classifySecondaryBlockKind(scanStart);
+    const signals = [...analysis.signals];
+
+    let pattern: AttachedBlockAnalysis["blockSequencePattern"] = "none";
+    if (analysis.kind === "paragraph" && secondary.kind === "table") {
+      pattern = "label_paragraph_table";
+    } else if (analysis.kind === "paragraph" && isListBlockKind(secondary.kind)) {
+      pattern = "label_paragraph_list";
+    } else if (isListBlockKind(analysis.kind) && secondary.kind === "paragraph") {
+      pattern = "list_paragraph";
+    }
+
+    if (secondary.kind === "table") {
+      signals.push("adjacent_table_follow");
+    } else if (isListBlockKind(secondary.kind)) {
+      signals.push("adjacent_list_follow");
+    }
+
+    if (pattern === "label_paragraph_list") {
+      signals.push("adjacent_paragraph_then_list", "strong_block_sequence");
+    } else if (pattern === "label_paragraph_table") {
+      signals.push("adjacent_paragraph_then_table", "strong_block_sequence");
+    }
+
+    if (pattern !== "none") {
+      signals.push("adjacency_pattern_detected");
+    }
+
+    return {
+      ...analysis,
+      signals: Array.from(new Set(signals)),
+      secondaryBlockKind: secondary.kind,
+      blockSequencePattern: pattern,
+    };
+  }
 
   function analyzeAttachedBlock(labelIndex: number): AttachedBlockAnalysis {
     let j = labelIndex + 1;
@@ -1163,6 +1270,8 @@ export function extractDocIntelligence(params: {
           childNodeIds: [],
           exceededSpan: false,
           signals: [],
+          secondaryBlockKind: "none",
+          blockSequencePattern: "none",
         };
       }
       j++;
@@ -1177,6 +1286,8 @@ export function extractDocIntelligence(params: {
         childNodeIds: [],
         exceededSpan: false,
         signals: [],
+        secondaryBlockKind: "none",
+        blockSequencePattern: "none",
       };
     }
 
@@ -1186,7 +1297,7 @@ export function extractDocIntelligence(params: {
     const firstIsTable = looksLikeTableBoundary(first, next);
     if (firstIsTable) {
       // Table is a hard grouping boundary: keep only label-level association.
-      return {
+      return withAdjacencySignals(labelIndex, {
         kind: "table",
         firstLine: labelIndex + 1,
         lastLine: labelIndex + 1,
@@ -1194,7 +1305,9 @@ export function extractDocIntelligence(params: {
         childNodeIds: [],
         exceededSpan: false,
         signals: ["attached_table_follow"],
-      };
+        secondaryBlockKind: "none",
+        blockSequencePattern: "none",
+      });
     }
     if (isHardBoundaryLine(first, next)) {
       return {
@@ -1205,6 +1318,8 @@ export function extractDocIntelligence(params: {
         childNodeIds: [],
         exceededSpan: false,
         signals: [],
+        secondaryBlockKind: "none",
+        blockSequencePattern: "none",
       };
     }
 
@@ -1230,6 +1345,8 @@ export function extractDocIntelligence(params: {
         childNodeIds: [],
         exceededSpan: false,
         signals: [],
+        secondaryBlockKind: "none",
+        blockSequencePattern: "none",
       };
     }
 
@@ -1298,7 +1415,7 @@ export function extractDocIntelligence(params: {
       signals.push(`attached_${kind}`);
     }
 
-    return {
+    return withAdjacencySignals(labelIndex, {
       kind,
       firstLine: firstAccepted,
       lastLine: lastAccepted,
@@ -1306,7 +1423,9 @@ export function extractDocIntelligence(params: {
       childNodeIds: Array.from(childNodeIds),
       exceededSpan,
       signals,
-    };
+      secondaryBlockKind: "none",
+      blockSequencePattern: "none",
+    });
   }
 
   function analyzeAttachedProcedureBlock(labelIndex: number): AttachedBlockAnalysis {
@@ -1415,7 +1534,7 @@ export function extractDocIntelligence(params: {
       signals.unshift("label_gap");
     }
 
-    return {
+    return withAdjacencySignals(labelIndex, {
       kind: "short_line_run",
       firstLine: firstAccepted,
       lastLine: lastAccepted,
@@ -1423,7 +1542,9 @@ export function extractDocIntelligence(params: {
       childNodeIds: Array.from(childNodeIds),
       exceededSpan,
       signals,
-    };
+      secondaryBlockKind: "none",
+      blockSequencePattern: "none",
+    });
   }
 
   function analyzeAttachedEntityBlock(labelIndex: number): AttachedBlockAnalysis {
@@ -1536,7 +1657,7 @@ export function extractDocIntelligence(params: {
       signals.unshift("label_gap");
     }
 
-    return {
+    return withAdjacencySignals(labelIndex, {
       kind: "short_line_run",
       firstLine: firstAccepted,
       lastLine: lastAccepted,
@@ -1544,7 +1665,9 @@ export function extractDocIntelligence(params: {
       childNodeIds: Array.from(childNodeIds),
       exceededSpan,
       signals,
-    };
+      secondaryBlockKind: "none",
+      blockSequencePattern: "none",
+    });
   }
 
   function isSectionAlreadySolved(
@@ -1659,6 +1782,17 @@ export function extractDocIntelligence(params: {
 
     let confidence = 0.8;
     if (procedureBlock.kind === "short_line_run") confidence = 0.76;
+
+    let adjacencyAdjustment = 0;
+    if (procedureBlock.kind === "numbered_list") {
+      adjacencyAdjustment += 0.3;
+    } else if (procedureBlock.kind === "bullet_list") {
+      adjacencyAdjustment += 0.2;
+    }
+    confidence = clampGroupConfidence(confidence + adjacencyAdjustment);
+    if (adjacencyAdjustment >= 0.25) {
+      procedureSignals.push("adjacency_score_high");
+    }
 
     pushGroup({
       id: makeGroupId("procedure_block"),
@@ -1800,6 +1934,18 @@ export function extractDocIntelligence(params: {
     if (phase.descriptive) confidence = 0.84;
     if (attachedValid && (block.kind === "numbered_list" || block.kind === "bullet_list")) {
       confidence = Math.max(confidence, 0.86);
+    }
+
+    let adjacencyAdjustment = 0;
+    if (attachedValid && block.kind === "paragraph") {
+      adjacencyAdjustment += 0.2;
+    }
+    if (attachedValid && block.blockSequencePattern === "label_paragraph_list") {
+      adjacencyAdjustment += 0.3;
+    }
+    confidence = clampGroupConfidence(confidence + adjacencyAdjustment);
+    if (adjacencyAdjustment >= 0.25) {
+      signals.push("adjacency_score_high");
     }
 
     pushGroup({
@@ -2286,6 +2432,20 @@ export function extractDocIntelligence(params: {
       let confidence = 0.79;
       if (entityDensity >= 0.8) confidence = 0.84;
       if (childNodeIds.size > 0) confidence = Math.max(confidence, 0.86);
+
+      let adjacencyAdjustment = 0;
+      if (block.kind === "short_line_run") {
+        adjacencyAdjustment += 0.2;
+      } else if (block.kind === "paragraph") {
+        adjacencyAdjustment += 0.1;
+      }
+      if (block.blockSequencePattern === "label_paragraph_table") {
+        adjacencyAdjustment += 0.2;
+      }
+      confidence = clampGroupConfidence(confidence + adjacencyAdjustment);
+      if (adjacencyAdjustment >= 0.25) {
+        signals.push("adjacency_score_high");
+      }
 
       pushGroup({
         id: makeGroupId("entity_group"),
