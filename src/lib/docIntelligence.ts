@@ -764,8 +764,8 @@ export function extractDocIntelligence(params: {
   const MAX_GROUP_SPAN = 10;
   const tocLineOffset = (() => {
     const tocMatch =
-      html.match(/^\s*<section class="toc"[\s\S]*?<\/section>/i) ??
-      html.match(/^\s*<nav class="toc"[\s\S]*?<\/nav>/i);
+      html.match(/<section class="toc"[\s\S]*?<\/section>/i) ??
+      html.match(/<nav class="toc"[\s\S]*?<\/nav>/i);
     if (!tocMatch) return 0;
     const tocText = tocMatch[0]
       .replace(/<br\s*\/?>/gi, "\n")
@@ -1426,6 +1426,127 @@ export function extractDocIntelligence(params: {
     };
   }
 
+  function analyzeAttachedEntityBlock(labelIndex: number): AttachedBlockAnalysis {
+    const primary = analyzeAttachedBlock(labelIndex);
+    const primaryValid =
+      (primary.kind === "short_line_run" ||
+        primary.kind === "bullet_list" ||
+        primary.kind === "numbered_list") &&
+      primary.itemCount >= 2;
+    if (primaryValid) {
+      return primary;
+    }
+
+    // Fallback for flattened list output where each list item may be separated
+    // by single blank lines in plain-text extraction.
+    let j = labelIndex + 1;
+    let skippedBlank = 0;
+    while (j < plainLines.length) {
+      const s = normalizeGroupLine(plainLines[j] ?? "");
+      if (s) break;
+      skippedBlank++;
+      if (skippedBlank > 1) return primary;
+      j++;
+    }
+    if (j >= plainLines.length) return primary;
+
+    const first = normalizeGroupLine(plainLines[j] ?? "");
+    const next = normalizeGroupLine(plainLines[j + 1] ?? "");
+    if (
+      !first ||
+      isHardBoundaryLine(first, next) ||
+      isGroupingBoundaryLine(first) ||
+      looksLikeListSectionLabel(first) ||
+      classifyProcedureLabel(first) !== null ||
+      classifyWorkflowLabel(first) ||
+      classifyRoadmap(first) !== null ||
+      !looksLikeEntityGroupItem(first)
+    ) {
+      return primary;
+    }
+
+    let firstAccepted = -1;
+    let lastAccepted = -1;
+    let itemCount = 0;
+    let exceededSpan = false;
+    const childNodeIds = new Set<string>();
+
+    while (j < plainLines.length) {
+      const candidate = normalizeGroupLine(plainLines[j] ?? "");
+      const nextCandidate = normalizeGroupLine(plainLines[j + 1] ?? "");
+
+      if (!candidate) {
+        let k = j + 1;
+        while (k < plainLines.length && !normalizeGroupLine(plainLines[k] ?? "")) {
+          k++;
+        }
+        if (k >= plainLines.length) break;
+
+        const resumed = normalizeGroupLine(plainLines[k] ?? "");
+        const resumedNext = normalizeGroupLine(plainLines[k + 1] ?? "");
+        if (
+          !resumed ||
+          isHardBoundaryLine(resumed, resumedNext) ||
+          isGroupingBoundaryLine(resumed) ||
+          looksLikeListSectionLabel(resumed) ||
+          classifyProcedureLabel(resumed) !== null ||
+          classifyWorkflowLabel(resumed) ||
+          classifyRoadmap(resumed) !== null ||
+          !looksLikeEntityGroupItem(resumed)
+        ) {
+          break;
+        }
+
+        j = k;
+        continue;
+      }
+
+      if (
+        isHardBoundaryLine(candidate, nextCandidate) ||
+        isGroupingBoundaryLine(candidate) ||
+        looksLikeListSectionLabel(candidate) ||
+        classifyProcedureLabel(candidate) !== null ||
+        classifyWorkflowLabel(candidate) ||
+        classifyRoadmap(candidate) !== null ||
+        !looksLikeEntityGroupItem(candidate)
+      ) {
+        break;
+      }
+
+      const lineNumber = j + 1;
+      if (firstAccepted === -1) firstAccepted = lineNumber;
+      if (lineNumber - firstAccepted + 1 > MAX_GROUP_SPAN) {
+        exceededSpan = true;
+        break;
+      }
+
+      for (const id of collectEntityChildIds(candidate)) {
+        childNodeIds.add(id);
+      }
+
+      itemCount++;
+      lastAccepted = lineNumber;
+      j++;
+    }
+
+    if (itemCount < 2) return primary;
+
+    const signals = ["attached_short_line_run", "html_flattened_entity_gap"];
+    if (skippedBlank > 0) {
+      signals.unshift("label_gap");
+    }
+
+    return {
+      kind: "short_line_run",
+      firstLine: firstAccepted,
+      lastLine: lastAccepted,
+      itemCount,
+      childNodeIds: Array.from(childNodeIds),
+      exceededSpan,
+      signals,
+    };
+  }
+
   function isSectionAlreadySolved(
     labelIndex: number,
     labelText: string,
@@ -1696,6 +1817,126 @@ export function extractDocIntelligence(params: {
     return true;
   }
 
+  function looksLikeEntityIntroAnchor(textLine: string): boolean {
+    const raw = textLine.trim();
+    const t = stripSectionNumber(raw.replace(/:$/, "")).trim();
+    if (!t) return false;
+    if (raw.length > 72) return false;
+    if (/[.?!]$/.test(raw)) return false;
+    if (t.split(/\s+/).filter(Boolean).length > 8) return false;
+    if (classifyProcedureLabel(t) !== null || classifyWorkflowLabel(t)) return false;
+    if (/^(phase|stage|step|iteration)\s+(?:\d+|[ivx]+)\b/i.test(t)) return false;
+    if (classifyRoadmap(t) !== null) return false;
+
+    const strongNounAnchor =
+      /^(core\s+)?(system\s+)?(key\s+)?(components?|modules?|entities?|items?|hardware units?|software modules?|subsystems?|layers?|engines?)$/i.test(
+        t,
+      ) ||
+      /(components?|modules?|entities?|items?|subsystems?|layers?|engines?|hardware units?|software modules?)\b/i.test(
+        t,
+      );
+
+    if (raw.endsWith(":")) {
+      return strongNounAnchor || ENTITY_INTRO_PATTERN.test(t);
+    }
+
+    return strongNounAnchor;
+  }
+
+  function toNormalizedGroupSpan(lineIndex: number, lastLine: number): {
+    start: number;
+    end: number;
+  } {
+    const start = Math.max(1, lineIndex + 1 - tocLineOffset);
+    const end = Math.max(start, lastLine - tocLineOffset);
+    return { start, end };
+  }
+
+  function hasTableLikeLineInSpanRaw(startLine: number, endLine: number): boolean {
+    for (let ln = startLine; ln <= endLine; ln++) {
+      const current = normalizeGroupLine(plainLines[ln - 1] ?? "");
+      const next = normalizeGroupLine(plainLines[ln] ?? "");
+      if (!current) continue;
+      if (looksLikeTableBoundary(current, next)) return true;
+      if (/^\|/.test(current) || /^<table\b/i.test(current)) return true;
+    }
+    return false;
+  }
+
+  function isMostlySentenceLikeEntityBlock(
+    entityCount: number,
+    sentenceLikeCount: number,
+  ): boolean {
+    const total = entityCount + sentenceLikeCount;
+    if (total === 0) return true;
+    return sentenceLikeCount / total >= 0.5;
+  }
+
+  function isWeakEntityEvidence(entityCount: number, childCount: number): boolean {
+    return entityCount <= 2 && childCount === 0;
+  }
+
+  function isEntityDensityHigh(entityCount: number, blockItemCount: number): boolean {
+    return entityCount / Math.max(1, blockItemCount) >= 0.66;
+  }
+
+  function shouldSuppressEntityForListOverlap(
+    startLine: number,
+    endLine: number,
+    entityCount: number,
+    childCount: number,
+  ): boolean {
+    return (
+      hasOverlappingGroup(startLine, endLine, ["list_section"]) &&
+      entityCount < 3 &&
+      childCount === 0
+    );
+  }
+
+  function looksLikeEntityGroupItem(lineText: string): boolean {
+    const raw = normalizeGroupLine(lineText);
+    if (!raw) return false;
+    const stripped = stripListMarker(raw);
+    if (!stripped) return false;
+    if (stripped.length > 80) return false;
+    if (/[.?!]$/.test(stripped)) return false;
+    if (classifyProcedureLabel(stripped) !== null || classifyWorkflowLabel(stripped)) {
+      return false;
+    }
+    if (/^(phase|stage|step|iteration)\s+(?:\d+|[ivx]+)\b/i.test(stripped)) {
+      return false;
+    }
+    if (classifyRoadmap(stripped) !== null) return false;
+    if (
+      /\b(initialize|install|configure|run|verify|collect|compare|tune|check|define|map|prepare|identify|evaluate|send|read|store)\b/i.test(
+        stripped,
+      )
+    ) {
+      return false;
+    }
+    if (looksLikeEntityLine(stripped)) return true;
+
+    const words = stripped.split(/\s+/).filter(Boolean);
+    if (words.length < 1 || words.length > 6) return false;
+    if (/\b(is|are|was|were|should|must|can|will|if|then)\b/i.test(stripped)) {
+      return false;
+    }
+
+    return /^[A-Za-z0-9][A-Za-z0-9\s\-\/(),+&]+$/.test(stripped);
+  }
+
+  function hasOverlappingGroup(
+    startLine: number,
+    endLine: number,
+    kinds: DocStructuralGroup["kind"][],
+  ): boolean {
+    return groups.some((g) => {
+      if (!kinds.includes(g.kind)) return false;
+      if (typeof g.startLine !== "number" || typeof g.endLine !== "number") return false;
+      return startLine <= g.endLine && g.startLine <= endLine;
+    });
+  }
+
   let currentGroupParentId = rootParentId;
   let lastStructuralAnchorLine = -1;
 
@@ -1925,6 +2166,137 @@ export function extractDocIntelligence(params: {
         endLine: i + 1,
         confidence: 0.72,
         signals: ["title_case_line", "paragraph_follow"],
+      });
+    }
+  }
+
+  // Additive entity-group pass (Phase 20C-B3C).
+  {
+    let currentEntityParentId = rootParentId;
+    let lastEntityAnchorLine = -1;
+
+    for (let i = 0; i < plainLines.length; i++) {
+      const raw = plainLines[i] ?? "";
+      const line = normalizeGroupLine(raw);
+      if (!line) continue;
+
+      const matched = lineToHierarchy.get(line.toLowerCase()) ?? [];
+      const parentCandidate =
+        matched.find((n) => n.role === "subsection") ??
+        matched.find((n) => n.role === "section") ??
+        matched.find((n) => n.role === "title");
+      if (parentCandidate) {
+        currentEntityParentId = parentCandidate.id;
+        lastEntityAnchorLine = i;
+      }
+
+      if (!looksLikeEntityIntroAnchor(line)) continue;
+      const isHeadingLikeAnchor = matched.some(
+        (n) => n.role === "section" || n.role === "subsection" || n.role === "label",
+      );
+      if (!line.endsWith(":") && !isHeadingLikeAnchor) continue;
+
+      const block = analyzeAttachedEntityBlock(i);
+      const validBlockKind =
+        block.kind === "short_line_run" ||
+        block.kind === "bullet_list" ||
+        block.kind === "numbered_list";
+      if (!validBlockKind || block.exceededSpan) continue;
+      if (block.firstLine === -1 || block.lastLine === -1) continue;
+
+      // Avoid overlap with stronger/specialized groups in the same region.
+      const { start: provisionalStart, end: provisionalEnd } = toNormalizedGroupSpan(
+        i,
+        block.lastLine,
+      );
+      if (
+        hasOverlappingGroup(provisionalStart, provisionalEnd, ["procedure_block", "phase_block"])
+      ) {
+        continue;
+      }
+
+      const entityLines: string[] = [];
+      const sentenceLikeLines: string[] = [];
+      const childNodeIds = new Set<string>(block.childNodeIds);
+      let firstEntityLine = -1;
+      let lastEntityLine = -1;
+
+      for (let ln = block.firstLine; ln <= block.lastLine; ln++) {
+        const lineValue = normalizeGroupLine(plainLines[ln - 1] ?? "");
+        if (!lineValue) continue;
+        if (looksLikeEntityGroupItem(lineValue)) {
+          entityLines.push(lineValue);
+          if (firstEntityLine === -1) firstEntityLine = ln;
+          lastEntityLine = ln;
+          for (const id of collectEntityChildIds(lineValue)) {
+            childNodeIds.add(id);
+          }
+        } else if (isLikelyParagraphFollow(lineValue) || /[.?!]$/.test(lineValue)) {
+          sentenceLikeLines.push(lineValue);
+        }
+      }
+
+      const entityCount = entityLines.length;
+      if (entityCount < 2) continue;
+      if (firstEntityLine === -1 || lastEntityLine === -1) continue;
+
+      const { start: spanStart, end: spanEnd } = toNormalizedGroupSpan(
+        i,
+        lastEntityLine,
+      );
+      if (spanEnd < spanStart || spanEnd - spanStart + 1 > MAX_GROUP_SPAN) continue;
+      if (hasTableLikeLineInSpanRaw(i + 1, lastEntityLine)) continue;
+      if (hasOverlappingGroup(spanStart, spanEnd, ["entity_group"])) continue;
+
+      // Suppress generic list_section overlap unless entity evidence is clearly stronger.
+      if (shouldSuppressEntityForListOverlap(spanStart, spanEnd, entityCount, childNodeIds.size)) {
+        continue;
+      }
+
+      if (isMostlySentenceLikeEntityBlock(entityCount, sentenceLikeLines.length)) continue;
+
+      const solved = isSectionAlreadySolved(
+        i,
+        line,
+        block.kind,
+        entityCount,
+        currentEntityParentId,
+      );
+      const weakEntityEvidence = isWeakEntityEvidence(entityCount, childNodeIds.size);
+      if (solved && weakEntityEvidence) continue;
+
+      const nearbyHierarchyAnchor = hasNearbyStructureAnchor(i, 3, false);
+      const anchorRecencyMissing =
+        lastEntityAnchorLine < 0 || i - lastEntityAnchorLine > 5;
+      const localHierarchyMissing =
+        !nearbyHierarchyAnchor && anchorRecencyMissing;
+
+      const entityDensity = entityCount / Math.max(1, block.itemCount);
+      const signals = ["entity_intro", ...block.signals];
+      if (isEntityDensityHigh(entityCount, block.itemCount)) {
+        signals.push("entity_density_high");
+      }
+      if (localHierarchyMissing) {
+        signals.push("local_hierarchy_missing");
+      }
+      if (documentStructureWeak) {
+        signals.push("doc_structure_weak");
+      }
+
+      let confidence = 0.79;
+      if (entityDensity >= 0.8) confidence = 0.84;
+      if (childNodeIds.size > 0) confidence = Math.max(confidence, 0.86);
+
+      pushGroup({
+        id: makeGroupId("entity_group"),
+        kind: "entity_group",
+        title: line.replace(/:$/, "").trim(),
+        parentId: currentEntityParentId,
+        childNodeIds: childNodeIds.size > 0 ? Array.from(childNodeIds) : undefined,
+        startLine: spanStart,
+        endLine: spanEnd,
+        confidence,
+        signals,
       });
     }
   }

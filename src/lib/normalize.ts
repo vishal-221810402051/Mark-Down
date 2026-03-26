@@ -396,6 +396,169 @@ function isLikelyProcedureLabel(line: string): boolean {
   return /^(Steps|Workflow|Procedure|Checklist|Validation|Run)\s*:?$/i.test(line.trim());
 }
 
+function stripSimpleListMarker(line: string): string {
+  return line
+    .trim()
+    .replace(/^[-*+]\s+/, "")
+    .replace(/^\d+(?:[.)])\s+/, "")
+    .trim();
+}
+
+function stripHeadingPrefix(line: string): string {
+  return line.trim().replace(/^#{1,6}\s+/, "").trim();
+}
+
+function normalizeEntityAnchorText(line: string): string {
+  return stripHeadingPrefix(line)
+    .replace(/^\d+(?:\.\d+)*[.)]?\s+/, "")
+    .replace(/[:.]+$/, "")
+    .trim();
+}
+
+function looksLikeEntityListAnchor(line: string): boolean {
+  const anchor = normalizeEntityAnchorText(line);
+  if (!anchor || anchor.length > 72) return false;
+  if (isLikelyCommand(anchor)) return false;
+  if (looksLikeCodeStart(anchor) || looksLikeCodeLineGeneric(anchor)) return false;
+  if (isLikelyTableLike(anchor) || isLikelyDiagramLike(anchor)) return false;
+
+  if (
+    /^(?:core|key|main|primary|system|hardware|software)\s+(?:components?|modules?|entities?|subsystems?|services?|units?|layers?)$/i.test(
+      anchor,
+    )
+  ) {
+    return true;
+  }
+
+  if (/^(?:components?|modules?|entities?|subsystems?|services?|units?|layers?)$/i.test(anchor)) {
+    return true;
+  }
+
+  return /^(?:the\s+)?(?:system|platform|architecture)\s+(?:includes?|contains?|integrates?)$/i.test(
+    anchor,
+  );
+}
+
+function looksLikeEntityListItem(line: string): boolean {
+  const s = stripSimpleListMarker(stripHeadingPrefix(line));
+  if (!s) return false;
+  if (s.length > 50) return false;
+  if (/[.:;!?]$/.test(s)) return false;
+  if (isLikelyProcedureLabel(s)) return false;
+  if (/^(?:phase|stage|step|part)\s+\d+/i.test(s)) return false;
+  if (/^\d+(?:\.\d+)*$/.test(s)) return false;
+  if (isLikelyCommand(s)) return false;
+  if (looksLikeCodeStart(s) || looksLikeCodeLineGeneric(s)) return false;
+  if (isLikelyTableLike(s) || isLikelyDiagramLike(s)) return false;
+  if (
+    /\b(should|must|will|can|could|would|may|might|is|are|was|were|include|includes|integrates|contains)\b/i.test(
+      s,
+    )
+  ) {
+    return false;
+  }
+
+  const words = s.split(/\s+/).filter(Boolean);
+  if (words.length < 1 || words.length > 5) return false;
+
+  if (looksLikeTechnicalEntityLine(s)) return true;
+  if (isTitleCaseLike(s) || isUppercaseLike(s)) return true;
+
+  return /^[A-Za-z0-9][A-Za-z0-9/&()+\-]*(?:\s+[A-Za-z0-9][A-Za-z0-9/&()+\-]*){0,4}$/.test(
+    s,
+  );
+}
+
+function getEntityListRunAfterAnchor(
+  lines: string[],
+  anchorIndex: number,
+): { count: number; lastIndex: number } {
+  let count = 0;
+  let lastIndex = -1;
+  let blankRun = 0;
+
+  for (let i = anchorIndex + 1; i < lines.length && i <= anchorIndex + 14; i++) {
+    const raw = lines[i] ?? "";
+    const trimmed = raw.trim();
+
+    if (!trimmed) {
+      blankRun++;
+      if (blankRun > 2 && count > 0) break;
+      continue;
+    }
+    blankRun = 0;
+
+    if (
+      isMarkdownHeading(raw) ||
+      isNumberHeading(raw) ||
+      isSeparator(raw) ||
+      isFenceOpenLine(raw) !== null ||
+      isLikelyTableLike(raw) ||
+      isLikelyDiagramLike(raw) ||
+      isLikelyCommand(raw)
+    ) {
+      break;
+    }
+
+    if (looksLikeEntityListItem(raw)) {
+      count++;
+      lastIndex = i;
+      continue;
+    }
+
+    break;
+  }
+
+  return { count, lastIndex };
+}
+
+function isEntityListContextLine(lines: string[], index: number): boolean {
+  const current = lines[index] ?? "";
+  if (!looksLikeEntityListItem(current)) return false;
+
+  for (let j = index - 1; j >= 0 && index - j <= 12; j--) {
+    const candidate = lines[j] ?? "";
+    const trimmed = candidate.trim();
+    if (!trimmed) continue;
+
+    if (looksLikeEntityListAnchor(candidate)) {
+      const run = getEntityListRunAfterAnchor(lines, j);
+      return run.count >= 2 && run.lastIndex >= index;
+    }
+
+    if (looksLikeEntityListItem(candidate)) continue;
+
+    if (
+      isMarkdownHeading(candidate) ||
+      isNumberHeading(candidate) ||
+      isFenceOpenLine(candidate) !== null ||
+      isLikelyTableLike(candidate) ||
+      isLikelyDiagramLike(candidate) ||
+      /[.?!]$/.test(stripHeadingPrefix(candidate))
+    ) {
+      break;
+    }
+
+    break;
+  }
+
+  return false;
+}
+
+function shouldDemoteEntityHeadingInContext(lines: string[], index: number, line: string): boolean {
+  const match = line.match(/^\s*(#{2,6})\s+(.+?)\s*$/);
+  if (!match) return false;
+  const headingText = match[2]?.trim() ?? "";
+  if (!headingText) return false;
+  if (/[.:;!?]$/.test(headingText)) return false;
+  if (headingText.length > 50) return false;
+  if (!looksLikeEntityListItem(headingText)) return false;
+
+  const probe = [...lines];
+  probe[index] = headingText;
+  return isEntityListContextLine(probe, index);
+}
+
 function isLikelyInstructionLabel(line: string, nextNonBlank: string): boolean {
   const s = line.trim();
   if (!s) return false;
@@ -609,6 +772,17 @@ export function normalizeInput(
       preserveListLine ||
       looksAsciiDiagram(line)
     ) {
+      if (
+        inferSemanticHeadings &&
+        isMarkdownHeading(line) &&
+        shouldDemoteEntityHeadingInContext(lines, i, line)
+      ) {
+        const demoted = stripHeadingPrefix(line);
+        out1.push(demoted);
+        notes.push(`Demoted entity-like heading to text: ${demoted}`);
+        stats.headingsFixed++;
+        continue;
+      }
       out1.push(line);
       continue;
     }
@@ -763,6 +937,11 @@ export function normalizeInput(
       }
 
       if (looksLikeTechnicalEntityLine(line)) {
+        out1.push(line);
+        continue;
+      }
+
+      if (isEntityListContextLine(lines, i)) {
         out1.push(line);
         continue;
       }
@@ -1477,4 +1656,3 @@ export function normalizeInput(
 
   return { normalizedText, notes, stats };
 }
-
