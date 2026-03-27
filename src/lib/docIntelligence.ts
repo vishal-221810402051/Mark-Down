@@ -1708,6 +1708,107 @@ export function extractDocIntelligence(params: {
     groups.push(group);
   }
 
+  function spanOverlapLength(
+    aStart: number,
+    aEnd: number,
+    bStart: number,
+    bEnd: number,
+  ): number {
+    const start = Math.max(aStart, bStart);
+    const end = Math.min(aEnd, bEnd);
+    if (end < start) return 0;
+    return end - start + 1;
+  }
+
+  function isSignificantProcedureOverlap(
+    aStart: number,
+    aEnd: number,
+    bStart: number,
+    bEnd: number,
+  ): boolean {
+    if (Math.abs(aStart - bStart) <= 5) return true;
+    const overlap = spanOverlapLength(aStart, aEnd, bStart, bEnd);
+    if (overlap <= 0) return false;
+    const aLen = Math.max(1, aEnd - aStart + 1);
+    const bLen = Math.max(1, bEnd - bStart + 1);
+    const overlapRatio = overlap / Math.min(aLen, bLen);
+    return overlapRatio > 0.5;
+  }
+
+  function procedureSignalStrength(signals: string[] | undefined): number {
+    const s = signals ?? [];
+    if (s.includes("attached_numbered_list") || s.includes("attached_bullet_list")) {
+      return 2;
+    }
+    if (s.includes("attached_short_line_run")) {
+      return 1;
+    }
+    return 0;
+  }
+
+  function procedureAttachTier(signals: string[] | undefined): number {
+    const s = signals ?? [];
+    if (s.includes("attached_numbered_list")) return 3;
+    if (s.includes("attached_bullet_list")) return 2;
+    if (s.includes("attached_short_line_run")) return 1;
+    return 0;
+  }
+
+  function procedureItemCountFromSignals(signals: string[] | undefined): number {
+    const s = signals ?? [];
+    for (const token of s) {
+      const m = token.match(/^item_count_(\d+)$/);
+      if (!m) continue;
+      return Number(m[1] ?? 0);
+    }
+    return 0;
+  }
+
+  function procedureLabelStrength(title: string | undefined): number {
+    const t = (title ?? "").trim().replace(/:$/, "").toLowerCase();
+    if (!t) return 0;
+    if (/^(steps?|procedure|workflow|checklist|validation|run)$/.test(t)) return 2;
+    if (/^(process|pipeline)$/.test(t)) return 1;
+    return 0;
+  }
+
+  function compareProcedureGroupStrength(
+    candidate: DocStructuralGroup,
+    existing: DocStructuralGroup,
+  ): number {
+    const candidateAttachTier = procedureAttachTier(candidate.signals);
+    const existingAttachTier = procedureAttachTier(existing.signals);
+    if (candidateAttachTier !== existingAttachTier) {
+      return candidateAttachTier - existingAttachTier;
+    }
+
+    const candidateItemCount = procedureItemCountFromSignals(candidate.signals);
+    const existingItemCount = procedureItemCountFromSignals(existing.signals);
+    if (candidateItemCount !== existingItemCount) {
+      return candidateItemCount - existingItemCount;
+    }
+
+    const candidateSignalStrength = procedureSignalStrength(candidate.signals);
+    const existingSignalStrength = procedureSignalStrength(existing.signals);
+    if (candidateSignalStrength !== existingSignalStrength) {
+      return candidateSignalStrength - existingSignalStrength;
+    }
+
+    const candidateLabelStrength = procedureLabelStrength(candidate.title);
+    const existingLabelStrength = procedureLabelStrength(existing.title);
+    if (candidateLabelStrength !== existingLabelStrength) {
+      return candidateLabelStrength - existingLabelStrength;
+    }
+
+    const candidateConfidence = candidate.confidence ?? 0.5;
+    const existingConfidence = existing.confidence ?? 0.5;
+    if (candidateConfidence !== existingConfidence) {
+      return candidateConfidence - existingConfidence;
+    }
+
+    return 0;
+  }
+
   function tryEmitProcedureBlock(
     lineIndex: number,
     labelText: string,
@@ -1794,7 +1895,7 @@ export function extractDocIntelligence(params: {
       procedureSignals.push("adjacency_score_high");
     }
 
-    pushGroup({
+    const candidateGroup: DocStructuralGroup = {
       id: makeGroupId("procedure_block"),
       kind: "procedure_block",
       title: labelText,
@@ -1807,7 +1908,56 @@ export function extractDocIntelligence(params: {
       endLine: spanEnd,
       confidence,
       signals: procedureSignals,
-    });
+    };
+
+    const overlappingProcedureIndices: number[] = [];
+    const normalizedCandidateTitle = (candidateGroup.title ?? "")
+      .trim()
+      .replace(/:$/, "")
+      .toLowerCase();
+    for (let idx = 0; idx < groups.length; idx++) {
+      const g = groups[idx];
+      if (g.kind !== "procedure_block") continue;
+      if (typeof g.startLine !== "number" || typeof g.endLine !== "number") continue;
+      const normalizedExistingTitle = (g.title ?? "")
+        .trim()
+        .replace(/:$/, "")
+        .toLowerCase();
+      const nearStart = Math.abs(spanStart - g.startLine) <= 5;
+      const duplicateLabelNearby =
+        normalizedCandidateTitle.length > 0 &&
+        normalizedCandidateTitle === normalizedExistingTitle &&
+        nearStart;
+      if (
+        !isSignificantProcedureOverlap(spanStart, spanEnd, g.startLine, g.endLine) &&
+        !nearStart &&
+        !duplicateLabelNearby
+      ) {
+        continue;
+      }
+      overlappingProcedureIndices.push(idx);
+    }
+
+    if (overlappingProcedureIndices.length > 0) {
+      for (const idx of overlappingProcedureIndices) {
+        const existing = groups[idx];
+        if (compareProcedureGroupStrength(candidateGroup, existing) <= 0) {
+          // Existing group is stronger or equivalent; suppress candidate.
+          return false;
+        }
+      }
+
+      // Candidate is stronger than all significant overlaps:
+      // keep one canonical group in-place and remove the rest.
+      const keepIndex = overlappingProcedureIndices[0];
+      groups[keepIndex] = candidateGroup;
+      for (let k = overlappingProcedureIndices.length - 1; k >= 1; k--) {
+        groups.splice(overlappingProcedureIndices[k], 1);
+      }
+      return true;
+    }
+
+    pushGroup(candidateGroup);
 
     return true;
   }
