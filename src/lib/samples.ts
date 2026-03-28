@@ -56,4 +56,49 @@ graph TD
   D --> E[PDF Engine]
 \`\`\`
 `,
+  smart_logistics: `# Smart Logistics Monitoring Platform
+
+Document Type: Product demo sample for structure extraction.
+
+## Context
+This platform monitors fleet temperature, humidity, and delivery events using distributed nodes and edge intelligence.
+
+## Phase 1 - Planning
+
+Checklist:
+- identify shipment categories
+- define acceptable temperature ranges
+- map warehouse handoff points
+- prepare device inventory
+
+## Phase 2 - Prototype Build
+
+Core Components:
+Sensor Unit
+Edge Controller
+Telemetry Buffer
+Alert Engine
+
+Workflow:
+1. initialize all modules
+2. read sensors
+3. store measurements
+4. evaluate thresholds
+5. send alert if anomaly exists
+
+## Phase 3 - Pilot Deployment
+
+Procedure:
+1. install devices in 3 vehicles
+2. collect 7 days of baseline data
+3. compare route-level anomalies
+4. tune thresholds for false positives
+
+Validation:
+| Checkpoint | Criteria | Owner |
+|-----------|----------|-------|
+| Connectivity | packet loss < 2% | network team |
+| Battery | survives 7 days | hardware team |
+| Alerting | anomaly notification works | software team |
+`,
 };

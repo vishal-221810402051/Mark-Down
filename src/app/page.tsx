@@ -382,6 +382,7 @@ export default function HomePage() {
         onGeneratePdf={handleGeneratePdf}
         onDownloadPdf={handleDownloadPdf}
         onExportJson={handleDownloadIntelligenceJson}
+        onLoadExample={() => setRawText(SAMPLES.smart_logistics ?? SAMPLES.chatgpt ?? "")}
         onEditPreview={handleEditPreview}
         onToggleSettings={() => setSettingsOpen(true)}
         onToggleOptimizer={() => setOptimizerOpen(true)}
@@ -407,7 +408,7 @@ export default function HomePage() {
         <div className="doc-card h-[calc(100vh-8rem)] overflow-hidden">
           <div className="flex h-full flex-col">
             <div className="flex items-center justify-between border-b px-3 py-2">
-              <div className="text-sm font-semibold text-white/90">Preview</div>
+              <div className="text-sm font-semibold text-white/90">Document Preview</div>
 
               <label className="flex items-center gap-2 text-xs text-slate-200">
                 <input
@@ -425,17 +426,13 @@ export default function HomePage() {
                 <div className="mt-1">Could not fully parse the document: {parseError}</div>
               </div>
             ) : null}
-            {!showNormalized && intelligence && !showDocMap ? (
+            {!showNormalized && intelligence ? (
               <div className="mx-3 mt-2 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-xs text-slate-200">
-                <div className="font-semibold text-white/90">Document Intelligence</div>
+                <div className="font-semibold text-white/90">Intelligence summary</div>
                 <div className="mt-1">
-                  Headings: {intelligence.stats.headings} • Code:{" "}
-                  {intelligence.stats.codeBlocks} • Commands:{" "}
-                  {intelligence.stats.commandBlocks} • Tables:{" "}
-                  {intelligence.stats.tables} • Diagrams:{" "}
-                  {intelligence.stats.diagrams} • Procedures:{" "}
-                  {intelligence.stats.procedures} • Callouts:{" "}
-                  {intelligence.stats.callouts}
+                  Detected: {intelligence.stats.procedures} procedures ·{" "}
+                  {(intelligence.groups ?? []).filter((g) => g.kind === "phase_block").length} phases ·{" "}
+                  {(intelligence.groups ?? []).filter((g) => g.kind === "entity_group").length} entity groups
                 </div>
               </div>
             ) : null}

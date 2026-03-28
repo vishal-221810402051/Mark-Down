@@ -5,6 +5,7 @@ type Props = {
   onGeneratePdf: () => void;
   onDownloadPdf: () => void;
   onExportJson?: () => void;
+  onLoadExample?: () => void;
   onEditPreview: () => void;
   onToggleSettings: () => void;
   onToggleOptimizer: () => void;
@@ -44,6 +45,7 @@ export default function TopBar({
   onGeneratePdf,
   onDownloadPdf,
   onExportJson,
+  onLoadExample,
   onEditPreview,
   onToggleSettings,
   onToggleOptimizer,
@@ -69,7 +71,7 @@ export default function TopBar({
           </div>
           <div className="leading-tight">
             <div className="text-sm font-semibold text-white">Mark-Down</div>
-            <div className="text-xs text-white/60">Structured Docs to PDF</div>
+            <div className="text-xs text-white/60">From messy text to structured documents</div>
           </div>
 
           {statusText ? (
@@ -105,6 +107,12 @@ export default function TopBar({
               title="Download full intelligence as JSON"
             >
               Export JSON
+            </GlassButton>
+          ) : null}
+
+          {onLoadExample ? (
+            <GlassButton onClick={onLoadExample} title="Load demo example">
+              Load example
             </GlassButton>
           ) : null}
 
