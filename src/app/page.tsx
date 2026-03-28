@@ -17,6 +17,12 @@ import type { DocHeading, DocState } from "@/lib/docModel";
 import { extractDocDiagnostics, type DocDiagnostics } from "@/lib/docDiagnostics";
 import { normalizeInput } from "@/lib/normalize";
 import { parseMarkdownToHtml } from "@/lib/parse";
+import {
+  resolveExternalDocTitle,
+  SCHEMA_VERSION,
+  toExternalDiagnostics,
+  toExternalIntelligence,
+} from "@/lib/payloadContract";
 import { clearSession, loadSession, saveSession } from "@/lib/sessionStore";
 import { SAMPLES } from "@/lib/samples";
 import { generateSuggestions } from "@/lib/suggestions/engine";
@@ -310,25 +316,29 @@ export default function HomePage() {
   }
 
   function handleDownloadIntelligenceJson() {
+    const externalIntelligence = toExternalIntelligence(intelligence);
+    const externalDiagnostics = toExternalDiagnostics(diagnostics);
+    const externalDocTitle = resolveExternalDocTitle(externalIntelligence);
+
     const payload = {
       meta: {
         exportedAt: new Date().toISOString(),
         app: "Mark-Down",
         version: "0.1.0",
-        schemaVersion: "e1",
+        schemaVersion: SCHEMA_VERSION,
       },
       input: {
         rawText,
         normalizedText: effectiveNormalized ?? rawText,
-        docTitle,
+        docTitle: externalDocTitle,
         inferSemanticHeadings,
       },
       normalization: {
         notes,
         stats,
       },
-      intelligence: intelligence ?? null,
-      diagnostics: diagnostics ?? null,
+      intelligence: externalIntelligence,
+      diagnostics: externalDiagnostics,
       parse: {
         parseError: parseError ?? null,
       },

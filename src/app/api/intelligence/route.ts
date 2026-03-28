@@ -1,8 +1,16 @@
 import { NextResponse } from "next/server";
 
-import { extractDocDiagnostics } from "@/lib/docDiagnostics";
+import { extractDocDiagnostics, type DocDiagnostics } from "@/lib/docDiagnostics";
+import type { DocIntelligence } from "@/lib/docIntelligence";
 import { normalizeInput } from "@/lib/normalize";
 import { parseMarkdownToHtml } from "@/lib/parse";
+import {
+  resolveExternalDocTitle,
+  SCHEMA_VERSION,
+  toExternalDiagnostics,
+  toExternalIntelligence,
+} from "@/lib/payloadContract";
+import type { DocHeading } from "@/lib/docModel";
 
 export const runtime = "nodejs";
 
@@ -15,27 +23,6 @@ const MAX_INPUT_CHARS = 500_000;
 
 function toBoolean(value: unknown): boolean {
   return value === true;
-}
-
-function deriveDocTitle(params: {
-  normalizedText: string;
-  intelligenceTitle: string | null;
-  titleBlockTitle?: string | null;
-  firstHeadingText?: string | null;
-}): string {
-  const { normalizedText, intelligenceTitle, titleBlockTitle, firstHeadingText } = params;
-  const candidate =
-    titleBlockTitle?.trim() ||
-    intelligenceTitle?.trim() ||
-    firstHeadingText?.trim() ||
-    normalizedText
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .find((line) => line.length > 0)
-      ?.replace(/^#+\s*/, "")
-      .trim();
-
-  return candidate || "Mark-Down Document";
 }
 
 export async function POST(req: Request) {
@@ -62,38 +49,47 @@ export async function POST(req: Request) {
       inferSemanticHeadings,
     });
 
-    const parsed = await parseMarkdownToHtml(normalizedText, {
-      includeToc: false,
-    });
+    let renderedHtml = "";
+    let parsedHeadings: DocHeading[] = [];
+    let parsedIntelligence: DocIntelligence | null = null;
+    let parseError: string | null = null;
 
-    let diagnostics = null;
     try {
-      diagnostics = extractDocDiagnostics({
+      const parsed = await parseMarkdownToHtml(normalizedText, {
+        includeToc: false,
+      });
+      renderedHtml = parsed.html;
+      parsedHeadings = parsed.headings;
+      parsedIntelligence = parsed.intelligence ?? null;
+    } catch (e: unknown) {
+      parseError = e instanceof Error ? e.message : "Parse error";
+    }
+
+    let diagnosticsInternal: DocDiagnostics | null = null;
+    try {
+      diagnosticsInternal = extractDocDiagnostics({
         rawText: text,
         normalizedText,
         notes,
         stats,
-        renderedHtml: parsed.html,
-        headings: parsed.headings,
-        intelligence: parsed.intelligence,
+        renderedHtml,
+        headings: parsedHeadings,
+        intelligence: parsedIntelligence,
       });
     } catch {
-      diagnostics = null;
+      diagnosticsInternal = null;
     }
 
-    const docTitle = deriveDocTitle({
-      normalizedText,
-      intelligenceTitle: parsed.intelligence.title,
-      titleBlockTitle: parsed.intelligence.titleBlock?.title,
-      firstHeadingText: parsed.headings[0]?.text ?? null,
-    });
+    const externalIntelligence = toExternalIntelligence(parsedIntelligence);
+    const diagnostics = toExternalDiagnostics(diagnosticsInternal);
+    const docTitle = resolveExternalDocTitle(externalIntelligence);
 
     const payload = {
       meta: {
         exportedAt: new Date().toISOString(),
         app: "Mark-Down",
         version: "0.1.0",
-        schemaVersion: "a1",
+        schemaVersion: SCHEMA_VERSION,
       },
       input: {
         rawText: text,
@@ -105,10 +101,10 @@ export async function POST(req: Request) {
         notes,
         stats,
       },
-      intelligence: parsed.intelligence ?? null,
+      intelligence: externalIntelligence,
       diagnostics,
       parse: {
-        parseError: null as string | null,
+        parseError,
       },
     };
 
@@ -120,4 +116,3 @@ export async function POST(req: Request) {
     );
   }
 }
-
