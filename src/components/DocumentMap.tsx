@@ -85,6 +85,7 @@ export default function DocumentMap({
   previewScrollRef,
   activeHeadingId,
 }: Props) {
+  const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
   const sections = intelligence?.headings ?? [];
   const groups = intelligence?.groups ?? [];
   const hierarchy = intelligence?.hierarchy ?? [];
@@ -124,11 +125,47 @@ export default function DocumentMap({
     (g) => g.parentId && !headingIds.has(g.parentId) && !titleNodeIds.has(g.parentId),
   );
 
-  const formatGroupLabel = (group: DocStructuralGroup) => {
-    const kindLabel = group.kind.replace(/_/g, " ");
-    const titleLabel = group.title?.trim() || "Untitled";
-    return `${kindLabel} - ${titleLabel}`;
+  const groupKindMeta: Record<
+    DocStructuralGroup["kind"],
+    { icon: string; label: string }
+  > = {
+    procedure_block: { icon: "⚙", label: "Procedure" },
+    entity_group: { icon: "🧩", label: "Entities" },
+    phase_block: { icon: "📍", label: "Phase" },
+    list_section: { icon: "•", label: "List" },
+    prose_section: { icon: "•", label: "Prose" },
+    table_section: { icon: "•", label: "Table" },
   };
+
+  const formatGroupLabel = (group: DocStructuralGroup) => {
+    const meta = groupKindMeta[group.kind];
+    const titleLabel = group.title?.trim() || "Untitled";
+    return `${meta.label} — ${titleLabel}`;
+  };
+
+  const renderGroupRow = (
+    group: DocStructuralGroup,
+    parentHeadingId?: string,
+  ) => (
+    <button
+      key={group.id}
+      type="button"
+      style={{
+        paddingLeft: "24px",
+        opacity: 0.85,
+        fontSize: "13px",
+        color: "rgba(255,255,255,0.7)",
+      }}
+      className="mb-1 block w-full rounded-lg py-1 text-left hover:bg-white/5"
+      onClick={() => {
+        if (parentHeadingId) {
+          scrollToTarget(previewScrollRef, parentHeadingId);
+        }
+      }}
+    >
+      {groupKindMeta[group.kind].icon} {formatGroupLabel(group)}
+    </button>
+  );
 
   return (
     <aside className="h-full overflow-auto rounded-2xl border border-white/10 bg-black/25 p-3 backdrop-blur-2xl shadow-[0_18px_45px_rgba(0,0,0,0.35)]">
@@ -180,37 +217,41 @@ export default function DocumentMap({
 
       <div className="space-y-3">
         <Group title="Document-level groups" count={rootGroups.length} defaultOpen={false}>
-          {rootGroups.map((group) => (
-            <div
-              key={group.id}
-              style={{ paddingLeft: "16px", opacity: 0.85, fontSize: "13px" }}
-              className="mb-1 rounded-lg py-1 text-white/80"
-            >
-              - {formatGroupLabel(group)}
-            </div>
-          ))}
+          {rootGroups.map((group) => renderGroupRow(group))}
         </Group>
 
         <Group title="Sections" count={sections.length}>
-          {sections.map((h) => (
+          {sections.map((h) => {
+            const childGroups = groupsByParentId.get(h.id) ?? [];
+            const groupCount = childGroups.length;
+            const collapsed = collapsedSections[h.id] ?? false;
+
+            return (
             <div key={h.id}>
               <Item
                 label={h.text}
-                sublabel={`H${h.level}`}
+                sublabel={`H${h.level}${groupCount > 0 ? ` · ${groupCount} groups` : ""}`}
                 active={activeHeadingId === h.id}
                 onClick={() => scrollToTarget(previewScrollRef, h.id)}
               />
-              {(groupsByParentId.get(h.id) ?? []).map((group) => (
-                <div
-                  key={group.id}
-                  style={{ paddingLeft: "16px", opacity: 0.85, fontSize: "13px" }}
-                  className="mb-1 rounded-lg py-1 text-white/80"
+              {groupCount > 0 ? (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setCollapsedSections((prev) => ({
+                      ...prev,
+                      [h.id]: !collapsed,
+                    }))
+                  }
+                  className="mb-1 ml-3 rounded-lg px-2 py-1 text-xs text-white/60 hover:bg-white/8 hover:text-white/80"
                 >
-                  - {formatGroupLabel(group)}
-                </div>
-              ))}
+                  {collapsed ? "Show groups" : "Hide groups"}
+                </button>
+              ) : null}
+              {!collapsed ? childGroups.map((group) => renderGroupRow(group, h.id)) : null}
             </div>
-          ))}
+          );
+          })}
         </Group>
 
         <Group title="Commands" count={commandBlocks.length} defaultOpen={false}>
@@ -272,15 +313,7 @@ export default function DocumentMap({
         </Group>
 
         <Group title="Other groups" count={otherGroups.length} defaultOpen={false}>
-          {otherGroups.map((group) => (
-            <div
-              key={group.id}
-              style={{ paddingLeft: "16px", opacity: 0.85, fontSize: "13px" }}
-              className="mb-1 rounded-lg py-1 text-white/80"
-            >
-              - {formatGroupLabel(group)}
-            </div>
-          ))}
+          {otherGroups.map((group) => renderGroupRow(group))}
         </Group>
       </div>
     </aside>
