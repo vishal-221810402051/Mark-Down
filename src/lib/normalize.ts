@@ -130,6 +130,16 @@ function looksLikeSeparatorRow(cells: string[]): boolean {
   return cells.every((c) => /^:?-{3,}:?$/.test(c.trim()));
 }
 
+function isLikelyMarkdownTableStartAt(lines: string[], index: number): boolean {
+  const line = lines[index] ?? "";
+  const currentCells = splitColumnsByPipes(line);
+  if (currentCells.length < 2) return false;
+
+  const next = nextNonBlankLine(lines, index + 1);
+  const nextCells = splitColumnsByPipes(next);
+  return looksLikeSeparatorRow(nextCells);
+}
+
 function toMarkdownTable(rows: string[][]): string[] {
   const header = rows[0];
   const colCount = header.length;
@@ -208,9 +218,51 @@ function isStrongBoundary(line: string): boolean {
   );
 }
 
-function fenceHasLanguage(openFenceLine: string): boolean {
-  // ```bash / ```ts / ```python etc.
-  return /^\s*```[\w-]+\s*$/.test(openFenceLine);
+function isPhaseLikeStructuralLine(line: string): boolean {
+  return /^(Phase|Stage|Iteration)\s+\d+\b/i.test(line.trim());
+}
+
+function isExpectedLine(line: string): boolean {
+  return /^Expected:/i.test(line.trim());
+}
+
+function isStructuralBlockStopLine(line: string): boolean {
+  return isPhaseLikeStructuralLine(line) || isExpectedLine(line);
+}
+
+function isLikelyFenceRecoveryBoundary(line: string, nextNonBlank: string): boolean {
+  const s = line.trim();
+  if (!s) return false;
+
+  // Do not force-close fences while we still look like Mermaid/ASCII content.
+  if (
+    isMermaidKeywordLine(line) ||
+    isMermaidSyntaxLine(line) ||
+    looksAsciiDiagram(line) ||
+    looksAsciiArrowChain(line) ||
+    /^\s*\|/.test(line) ||
+    /^[|v^]+$/i.test(s)
+  ) {
+    return false;
+  }
+
+  // If this line still looks executable, keep the fence open.
+  if (
+    isLikelyCommand(line) ||
+    looksLikeCodeStart(line) ||
+    looksLikeCodeLineGeneric(line)
+  ) {
+    return false;
+  }
+
+  if (isExpectedLine(line)) return true;
+  if (isStrongBoundary(line) || isNumberHeading(line) || isSeparator(line)) return true;
+  if (/^(phase|stage|iteration|step)\s+[0-9ivx]+\b/i.test(s)) return true;
+
+  if (/^(warning|important|alert|note|tip)\s*:/i.test(s)) return true;
+  if (isLikelyProcedureLabel(s) || looksLikeSectionTitle(s)) return true;
+
+  return isLikelySemanticHeadingLine(line, nextNonBlank);
 }
 
 function isBlockquote(line: string): boolean {
@@ -273,7 +325,109 @@ function isLikelyCommand(line: string): boolean {
 }
 
 function isCommandsLabel(line: string): boolean {
-  return /^\s*(Commands|Command|CLI|Terminal)\s*:\s*$/i.test(line.trim());
+  return /^\s*(Commands|Command|CLI|Terminal|CMD)\s*:\s*$/i.test(line.trim());
+}
+
+function isQuotedCommandLine(line: string): boolean {
+  const m = line.match(/^\s*>\s*(.+?)\s*$/);
+  if (!m) return false;
+  const body = (m[1] ?? "").trim();
+  if (!body) return false;
+  if (isLikelyCommand(body)) return true;
+
+  // fallback command-ish shell tokens (e.g. "run system_check")
+  return /^[a-z][a-z0-9_-]*(?:\s+[a-z0-9_./:=-]+)+$/i.test(body);
+}
+
+function normalizeQuotedCommandLine(line: string): string {
+  return line.replace(/^\s*>\s*/, "").trimEnd();
+}
+
+function isMermaidKeywordLine(line: string): boolean {
+  return /^\s*mermaid\s*:?\s*$/i.test(line.trim());
+}
+
+function isMermaidSyntaxLine(line: string): boolean {
+  const s = line.trim();
+  if (!s) return false;
+
+  return (
+    /^(flowchart|graph\s+(TD|LR|RL|BT)|sequenceDiagram|classDiagram|stateDiagram|erDiagram|journey|gantt)\b/i.test(
+      s,
+    ) ||
+    /-->|==>|-.->/.test(s) ||
+    /[A-Za-z0-9_]+\[[^\]]+\]/.test(s)
+  );
+}
+
+function looksAsciiArrowChain(line: string): boolean {
+  const s = line.trim();
+  if (!s || s.length > 180) return false;
+  if (isMermaidSyntaxLine(s) || /\|[^|]+\|/.test(s)) return false;
+
+  if (/\[[^\]]+\]\s*-\-?>\s*\[[^\]]+\]/.test(s)) return true;
+
+  const arrows = (s.match(/-\-?>/g) ?? []).length;
+  if (arrows < 2) return false;
+
+  return /^[A-Za-z0-9_[\]().,:/\- ]+(?:\s*-\-?>\s*[A-Za-z0-9_[\]().,:/\- ]+)+$/.test(
+    s,
+  );
+}
+
+function looksAsciiBoxBorder(line: string): boolean {
+  const s = line.trim();
+  if (!s) return false;
+  return (
+    /^\+[=+\- ]+\+$/.test(s) ||
+    /\+[=+\- ]{3,}\+/.test(s)
+  );
+}
+
+function looksAsciiPipeRow(line: string): boolean {
+  const s = line.trim();
+  return /^\|[^|]*\|$/.test(s);
+}
+
+function looksAsciiConnector(line: string): boolean {
+  const s = line.trim();
+  return /^[|v^]+$/i.test(s);
+}
+
+function isAsciiStartLine(lines: string[], index: number): boolean {
+  const line = lines[index] ?? "";
+  const s = line.trim();
+  if (!s) return false;
+  if (isLikelyMarkdownTableStartAt(lines, index)) return false;
+
+  if (looksAsciiArrowChain(line)) return true;
+  if (looksAsciiBoxBorder(line)) return true;
+
+  if (!looksAsciiPipeRow(line) && !looksAsciiConnector(line)) return false;
+
+  const prev = prevNonBlankLine(lines, index - 1).trim();
+  const next = nextNonBlankLine(lines, index + 1).trim();
+  return (
+    looksAsciiBoxBorder(prev) ||
+    looksAsciiBoxBorder(next) ||
+    looksAsciiPipeRow(prev) ||
+    looksAsciiPipeRow(next) ||
+    looksAsciiConnector(prev) ||
+    looksAsciiConnector(next)
+  );
+}
+
+function isAsciiContinuationLine(line: string): boolean {
+  const s = line.trim();
+  if (!s) return true; // spacing noise allowed inside block
+  if (looksAsciiArrowChain(line)) return true;
+  if (looksAsciiBoxBorder(line)) return true;
+  if (looksAsciiPipeRow(line)) return true;
+  if (looksAsciiConnector(line)) return true;
+  if (/\+[=+\- ]{3,}\+/.test(s)) return true;
+  if (/^\|[^|]+\|\s*$/.test(s)) return true;
+  if (/^[+\-| ]{3,}$/.test(s)) return true;
+  return false;
 }
 
 function detectCommandLang(lines: string[]): "powershell" | "bash" {
@@ -330,6 +484,8 @@ function isLikelySetupLabel(line: string): boolean {
   if (isLikelyCommand(label)) return false;
   if (looksLikeCodeStart(label) || looksLikeCodeLineGeneric(label)) return false;
   if (isLikelyTableLike(label) || isLikelyDiagramLike(label)) return false;
+  if (isMermaidSyntaxLine(label)) return false;
+  if (/[\[\]{}]|-->|->/.test(label)) return false;
 
   return /(?:Create|Install|Run|Verify|Load|Save|Activate|Initialize|Add|Make|Backup|Monitor|Check|Access|Exit|Place|Resulting|Expected|Contents|Update|Example|Inside|Outputs)/.test(
     label,
@@ -385,6 +541,7 @@ function isLikelyDiagramLike(line: string): boolean {
   const s = line.trim();
   return (
     looksAsciiDiagram(line) ||
+    looksAsciiArrowChain(line) ||
     /^(graph TD|graph LR|flowchart|sequenceDiagram|classDiagram|stateDiagram|erDiagram|journey|gantt)\b/.test(
       s,
     ) ||
@@ -826,6 +983,15 @@ export function normalizeInput(
       /^\s*(Phase|Step|Part|Module)\s+\d+/i.test(line) &&
       line.trim().length < 120
     ) {
+      // SH1.7: preserve structural phase lines aggressively as headings
+      // (outside fences; table-like lines are excluded)
+      if (isPhaseLikeStructuralLine(line) && !isLikelyTableLike(line)) {
+        out1.push(`## ${line.trim()}`);
+        notes.push(`Promoted phase heading: ## ${line.trim()}`);
+        stats.headingsFixed++;
+        continue;
+      }
+
       const prev = (lines[i - 1] ?? "").trim();
       const next = (lines[i + 1] ?? "").trim();
       const prevNB = prevNonBlankLine(lines, i - 1);
@@ -980,10 +1146,9 @@ export function normalizeInput(
     notes.push(`Merged ${mergedListGaps} blank line gap(s) inside lists`);
   }
 
-  // 1c) Close unclosed fenced blocks at strong boundaries.
+  // 1c) Close unclosed fenced blocks at nearest safe boundaries.
   const out1c: string[] = [];
   let inFenceC = false;
-  let fenceOpenLine = "";
 
   for (let i = 0; i < out1b.length; i++) {
     const line = out1b[i] ?? "";
@@ -992,7 +1157,6 @@ export function normalizeInput(
       const open = isFenceOpenLine(line);
       if (open !== null) {
         inFenceC = true;
-        fenceOpenLine = line;
         out1c.push(line);
         continue;
       }
@@ -1004,19 +1168,18 @@ export function normalizeInput(
     // inside fence
     if (inFenceC && isFenceCloseLine(line)) {
       inFenceC = false;
-      fenceOpenLine = "";
       out1c.push(line);
       continue;
     }
 
-    // If user forgot closing fence, close it before strong boundary lines.
-    if (fenceHasLanguage(fenceOpenLine) && isStrongBoundary(line)) {
+    // If user forgot closing fence, close it before safe boundary lines.
+    const nextNonBlank = nextNonBlankLine(out1b, i + 1);
+    if (isLikelyFenceRecoveryBoundary(line, nextNonBlank)) {
       out1c.push("```");
       out1c.push("");
       stats.fencesAutoClosed++;
-      notes.push("Auto-closed unclosed fenced block before strong section boundary");
+      notes.push(`Auto-closed unclosed fenced block before safe boundary: ${line.trim()}`);
       inFenceC = false;
-      fenceOpenLine = "";
 
       // Process boundary line in non-fence mode.
       out1c.push(line);
@@ -1027,10 +1190,44 @@ export function normalizeInput(
   }
 
   // 2) Command streaks -> fenced code blocks (outside existing fences only).
-  const out2: string[] = [];
-  let inFence2 = false;
+  // 1d) After fence recovery, force-promote phase/stage/iteration lines again
+  // so structural headings are preserved even when earlier malformed fences existed.
+  const out1d: string[] = [];
+  let inFence1d = false;
   for (let i = 0; i < out1c.length; i++) {
     const line = out1c[i] ?? "";
+
+    if (isFenceLine(line)) {
+      inFence1d = !inFence1d;
+      out1d.push(line);
+      continue;
+    }
+
+    if (inFence1d) {
+      out1d.push(line);
+      continue;
+    }
+
+    if (isMarkdownHeading(line) || isNumberHeading(line)) {
+      out1d.push(line);
+      continue;
+    }
+
+    if (isPhaseLikeStructuralLine(line) && !isLikelyTableLike(line)) {
+      out1d.push(`## ${line.trim()}`);
+      notes.push(`Promoted phase heading (post-recovery): ## ${line.trim()}`);
+      stats.headingsFixed++;
+      continue;
+    }
+
+    out1d.push(line);
+  }
+
+  // 2) Command streaks -> fenced code blocks (outside existing fences only).
+  const out2: string[] = [];
+  let inFence2 = false;
+  for (let i = 0; i < out1d.length; i++) {
+    const line = out1d[i] ?? "";
 
     if (isFenceLine(line)) {
       inFence2 = !inFence2;
@@ -1038,23 +1235,26 @@ export function normalizeInput(
       continue;
     }
 
-    if (!inFence2 && line.trim() && isLikelyCommand(line)) {
+    if (!inFence2 && line.trim() && (isLikelyCommand(line) || isQuotedCommandLine(line))) {
       const streak: string[] = [line];
       let j = i + 1;
 
       while (
-        j < out1c.length &&
-        (out1c[j] ?? "").trim() &&
-        isLikelyCommand(out1c[j] ?? "")
+        j < out1d.length &&
+        (out1d[j] ?? "").trim() &&
+        (isLikelyCommand(out1d[j] ?? "") || isQuotedCommandLine(out1d[j] ?? ""))
       ) {
-        streak.push(out1c[j] ?? "");
+        streak.push(out1d[j] ?? "");
         j++;
       }
 
       if (streak.length >= 2) {
-        const lang = detectCommandLang(streak);
+        const normalizedStreak = streak.map((ln) =>
+          isQuotedCommandLine(ln) ? normalizeQuotedCommandLine(ln) : ln,
+        );
+        const lang = detectCommandLang(normalizedStreak);
         out2.push(`\`\`\`${lang}`);
-        out2.push(...streak);
+        out2.push(...normalizedStreak);
         out2.push("```");
         out2.push("");
         stats.commandBlocksCreated++;
@@ -1110,6 +1310,7 @@ export function normalizeInput(
           isNumberHeading(nxt) ||
           isSeparator(nxt) ||
           isBlockquote(nxt) ||
+          isStructuralBlockStopLine(nxt) ||
           isLikelySemanticHeadingLine(nxt) ||
           looksLikeSectionTitle(nxt) ||
           isLikelyNumberedSectionTitle(nxt)
@@ -1172,7 +1373,10 @@ export function normalizeInput(
       const block: string[] = [];
       let j = i + 1;
       const isCommandish = (ln: string) =>
-        isLikelyCommand(ln) || /^\s*#\s+/.test(ln) || ln.trim() === "";
+        isLikelyCommand(ln) ||
+        isQuotedCommandLine(ln) ||
+        /^\s*#\s+/.test(ln) ||
+        ln.trim() === "";
 
       while (j < out2setup.length) {
         const nxt = out2setup[j] ?? "";
@@ -1185,6 +1389,7 @@ export function normalizeInput(
         }
         // structural boundaries
         if (isMarkdownHeading(nxt) || isNumberHeading(nxt)) break;
+        if (isStructuralBlockStopLine(nxt)) break;
         if (isSeparator(nxt) || isBlockquote(nxt)) break;
         // stop on prose
         break;
@@ -1192,13 +1397,16 @@ export function normalizeInput(
       }
 
       // Only fence if we have at least 2 lines OR at least one looks like a command
-      const hasCmd = block.some((b) => isLikelyCommand(b));
+      const hasCmd = block.some((b) => isLikelyCommand(b) || isQuotedCommandLine(b));
       if (block.length >= 2 || hasCmd) {
-        const lang = detectCommandLang(block);
+        const normalizedBlock = block.map((b) =>
+          isQuotedCommandLine(b) ? normalizeQuotedCommandLine(b) : b,
+        );
+        const lang = detectCommandLang(normalizedBlock);
         out2b.push("```" + lang);
 
         // Keep "# ..." lines intact inside fenced command blocks
-        for (const b of block) out2b.push(b);
+        for (const b of normalizedBlock) out2b.push(b);
 
         out2b.push("```");
         out2b.push("");
@@ -1245,7 +1453,11 @@ export function normalizeInput(
       isBlockquote(line) ||
       isSeparator(line) ||
       isListLine(line) ||
-      isCommandsLabel(line)
+      isCommandsLabel(line) ||
+      isMermaidKeywordLine(line) ||
+      isMermaidSyntaxLine(line) ||
+      isStructuralBlockStopLine(line) ||
+      looksAsciiArrowChain(line)
     ) {
       outCodeFenced.push(line);
       continue;
@@ -1266,8 +1478,11 @@ export function normalizeInput(
         if (/^\s*[-*]\s+/.test(nxt)) break;
         if (/^\s*\d+\.\s+/.test(nxt)) break;
         if (/^\s*\d+\)\s+/.test(nxt)) break;
+        if (isStructuralBlockStopLine(nxt)) break;
         if (isSeparator(nxt)) break;
         if (isBlockquote(nxt)) break;
+        if (isMermaidKeywordLine(nxt) || isMermaidSyntaxLine(nxt) || looksAsciiArrowChain(nxt))
+          break;
 
         if (!nxtTrimmed) {
           if (sqlLikeStart) {
@@ -1352,25 +1567,47 @@ export function normalizeInput(
 
     if (!inFence3) {
       const trimmed = line.trim();
-      const looksMermaid = MERMAID_HINTS.some((hint) => trimmed.startsWith(hint));
+      const looksMermaid =
+        MERMAID_HINTS.some((hint) => trimmed.startsWith(hint)) || isMermaidKeywordLine(line);
       if (looksMermaid) {
-        const block: string[] = [line];
-        let j = i + 1;
+        const block: string[] = [];
+        let j = i;
+
+        if (!isMermaidKeywordLine(line)) {
+          block.push(line);
+          j = i + 1;
+        } else {
+          j = i + 1;
+        }
+
         while (j < outCodeFenced.length) {
           const nxt = outCodeFenced[j] ?? "";
           const nxtTrimmed = nxt.trim();
+
           // allow blank lines inside Mermaid blocks
           if (!nxtTrimmed) {
-            block.push(nxt);
+            if (block.length > 0) block.push(nxt);
             j++;
             continue;
           }
+
+          // if "Mermaid" label is present, wait for the first real mermaid syntax line
+          if (block.length === 0 && !isMermaidSyntaxLine(nxtTrimmed)) {
+            break;
+          }
+
+          if (isStructuralBlockStopLine(nxt)) break;
           if (/^\d+\.\d+/.test(nxtTrimmed)) break;
-          if (/^(flowchart|graph|sequenceDiagram)/.test(nxtTrimmed)) break;
           if (isBlockBoundary(nxt)) break;
           block.push(nxt);
           j++;
         }
+
+        if (block.length === 0) {
+          out3.push(line);
+          continue;
+        }
+
         out3.push("```mermaid");
         out3.push(...block);
         out3.push("```");
@@ -1387,13 +1624,22 @@ export function normalizeInput(
 
   // ASCII diagram grouping (robust version)
   const outAscii: string[] = [];
+  let inFenceAscii = false;
 
   for (let i = 0; i < out3.length; i++) {
     const line = out3[i] ?? "";
+    if (isFenceLine(line)) {
+      inFenceAscii = !inFenceAscii;
+      outAscii.push(line);
+      continue;
+    }
 
-    const isAsciiStart =
-      /^[+\-]{3,}/.test(line.trim()) ||
-      (/^\|[^|]*\|$/.test(line.trim()) && /^[+\-]/.test(out3[i - 1]?.trim() ?? ""));
+    if (inFenceAscii) {
+      outAscii.push(line);
+      continue;
+    }
+
+    const isAsciiStart = isAsciiStartLine(out3, i);
     if (!isAsciiStart) {
       outAscii.push(line);
       continue;
@@ -1401,36 +1647,56 @@ export function normalizeInput(
 
     const block: string[] = [line];
     let j = i + 1;
+    let nonBlankCount = line.trim() ? 1 : 0;
+    let sawArrowChain = looksAsciiArrowChain(line);
+    let sawBoxEvidence =
+      looksAsciiBoxBorder(line) ||
+      looksAsciiPipeRow(line) ||
+      looksAsciiConnector(line) ||
+      /\+[=+\- ]{3,}\+/.test(line.trim());
 
     while (j < out3.length) {
       const nxt = out3[j] ?? "";
       const trimmed = nxt.trim();
 
-      // allow blank lines inside ASCII diagram
-      if (trimmed === "") {
+      // Stop block at hard structural boundaries.
+      if (
+        isFenceLine(nxt) ||
+        isMarkdownHeading(nxt) ||
+        isNumberHeading(nxt) ||
+        isStructuralBlockStopLine(nxt) ||
+        isSeparator(nxt) ||
+        isBlockquote(nxt)
+      ) {
+        break;
+      }
+
+      // Keep ASCII boxes separate from markdown tables.
+      if (isLikelyMarkdownTableStartAt(out3, j)) {
+        break;
+      }
+
+      if (isAsciiContinuationLine(nxt)) {
         block.push(nxt);
+        if (trimmed) nonBlankCount++;
+        if (looksAsciiArrowChain(nxt)) sawArrowChain = true;
+        if (
+          looksAsciiBoxBorder(nxt) ||
+          looksAsciiPipeRow(nxt) ||
+          looksAsciiConnector(nxt) ||
+          /\+[=+\- ]{3,}\+/.test(trimmed)
+        ) {
+          sawBoxEvidence = true;
+        }
         j++;
         continue;
       }
 
-      // connector lines
-      if (/^[|v^]/i.test(trimmed)) {
-        block.push(nxt);
-        j++;
-        continue;
-      }
-
-      // ascii box lines
-      if (/^[+\-| ]{3,}/.test(trimmed)) {
-        block.push(nxt);
-        j++;
-        continue;
-      }
-
+      // normal prose / unrelated content -> stop current diagram block
       break;
     }
 
-    if (block.length >= 3) {
+    if (nonBlankCount >= 3 || sawArrowChain || sawBoxEvidence) {
       outAscii.push("```ascii");
       outAscii.push(...block);
       outAscii.push("```");
@@ -1632,13 +1898,44 @@ export function normalizeInput(
 
   const outFinalBeforeClose = outFenceSafe;
 
-  // 4) Fence repair: auto-close unclosed fences at EOF.
-  const fenceCount = outFinalBeforeClose.filter((line) =>
-    /^\s*```/.test(line.trim()),
-  ).length;
-  let finalLines = outFinalBeforeClose;
-  if (fenceCount % 2 === 1) {
-    finalLines = [...outFinalBeforeClose, "```", ""];
+  // 4) Final fence repair:
+  // close malformed fences at the nearest safe boundary first,
+  // then fallback to EOF if no safe boundary appears.
+  const finalLines: string[] = [];
+  let inFenceFinal = false;
+  for (let i = 0; i < outFinalBeforeClose.length; i++) {
+    const line = outFinalBeforeClose[i] ?? "";
+
+    if (!inFenceFinal) {
+      const open = isFenceOpenLine(line);
+      if (open !== null) inFenceFinal = true;
+      finalLines.push(line);
+      continue;
+    }
+
+    if (isFenceCloseLine(line)) {
+      inFenceFinal = false;
+      finalLines.push(line);
+      continue;
+    }
+
+    const nextNonBlank = nextNonBlankLine(outFinalBeforeClose, i + 1);
+    if (isLikelyFenceRecoveryBoundary(line, nextNonBlank)) {
+      finalLines.push("```");
+      finalLines.push("");
+      stats.fencesAutoClosed++;
+      notes.push(`Auto-closed unclosed fenced block before safe boundary: ${line.trim()}`);
+      inFenceFinal = false;
+      finalLines.push(line);
+      continue;
+    }
+
+    finalLines.push(line);
+  }
+
+  if (inFenceFinal) {
+    finalLines.push("```");
+    finalLines.push("");
     stats.fencesAutoClosed++;
     notes.push("Auto-closed an unclosed ``` fence at EOF");
   }

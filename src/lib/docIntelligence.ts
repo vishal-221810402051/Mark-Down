@@ -155,6 +155,23 @@ function inferCodeKind(language: string, text: string): "code" | "command" | "me
   return "code";
 }
 
+function looksLikeAsciiArrowChain(line: string): boolean {
+  const s = line.trim();
+  if (!s || s.length > 180) return false;
+  if (/^(flowchart|graph\s+(TD|LR|RL|BT)|sequenceDiagram|classDiagram|stateDiagram|erDiagram|journey|gantt)\b/i.test(s)) {
+    return false;
+  }
+  if (/\|[^|]+\|/.test(s)) return false;
+
+  if (/\[[^\]]+\]\s*-\-?>\s*\[[^\]]+\]/.test(s)) return true;
+  const arrows = (s.match(/-\-?>/g) ?? []).length;
+  if (arrows < 2) return false;
+
+  return /^[A-Za-z0-9_[\]().,:/\- ]+(?:\s*-\-?>\s*[A-Za-z0-9_[\]().,:/\- ]+)+$/.test(
+    s,
+  );
+}
+
 function classifyRoadmap(
   text: string,
 ):
@@ -590,6 +607,20 @@ export function extractDocIntelligence(params: {
 
   const plainLines = text.replace(/\r\n/g, "\n").split("\n");
   const inferredTitleBlock = inferPlainTitleBlock(plainLines);
+
+  // Fallback ASCII diagram detection for unfenced arrow-chain flows.
+  if (!diagrams.some((d) => d.kind === "ascii")) {
+    for (const line of plainLines) {
+      if (!looksLikeAsciiArrowChain(line)) continue;
+      diagrams.push({
+        index: diagrams.length + 1,
+        kind: "ascii",
+        title: null,
+        preview: textPreview(line),
+      });
+      break;
+    }
+  }
 
   const titleBlock: DocTitleBlockInfo = {
     title: inferredTitleBlock.title ?? title,
@@ -1820,6 +1851,26 @@ export function extractDocIntelligence(params: {
     },
   ): boolean {
     const procedureBlock = analyzeAttachedProcedureBlock(lineIndex);
+    const immediateTableAfterLabel = (() => {
+      let j = lineIndex + 1;
+      let blankCount = 0;
+      while (j < plainLines.length) {
+        const current = normalizeGroupLine(plainLines[j] ?? "");
+        if (!current) {
+          blankCount++;
+          if (blankCount > 1) return false;
+          j++;
+          continue;
+        }
+        const next = normalizeGroupLine(plainLines[j + 1] ?? "");
+        return looksLikeTableBoundary(current, next);
+      }
+      return false;
+    })();
+    const hasListEvidenceAfterLabel =
+      procedureBlock.kind === "numbered_list" ||
+      procedureBlock.kind === "bullet_list" ||
+      (procedureBlock.kind === "short_line_run" && procedureBlock.itemCount >= 2);
     const requireStrongListEvidence = options?.requireStrongListEvidence === true;
     const procedureAttachKindValid = requireStrongListEvidence
       ? procedureBlock.kind === "numbered_list" ||
@@ -1835,6 +1886,13 @@ export function extractDocIntelligence(params: {
       procedureBlock.firstLine === -1 ||
       procedureBlock.lastLine === -1
     ) {
+      return false;
+    }
+
+    // SH1.1: disambiguate table caption/header labels from real procedures.
+    // Suppress only in strict local context:
+    // label -> optional single blank line -> table, with no local list evidence.
+    if (immediateTableAfterLabel && !hasListEvidenceAfterLabel) {
       return false;
     }
 

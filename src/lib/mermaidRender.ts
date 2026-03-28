@@ -29,7 +29,13 @@ export async function renderMermaidToSvg(code: string): Promise<string> {
       mermaid.initialize({
         startOnLoad: true,
         theme: "default",
-        securityLevel: "strict"
+        securityLevel: "strict",
+        flowchart: {
+          htmlLabels: false,
+          nodeSpacing: 50,
+          rankSpacing: 50,
+          padding: 10
+        }
       });
     </script>
   </body>
