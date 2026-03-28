@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 type Props = {
   onGeneratePdf: () => void;
   onDownloadPdf: () => void;
+  onExportJson?: () => void;
   onEditPreview: () => void;
   onToggleSettings: () => void;
   onToggleOptimizer: () => void;
@@ -42,6 +43,7 @@ function GlassButton(props: {
 export default function TopBar({
   onGeneratePdf,
   onDownloadPdf,
+  onExportJson,
   onEditPreview,
   onToggleSettings,
   onToggleOptimizer,
@@ -95,6 +97,16 @@ export default function TopBar({
           >
             Download
           </GlassButton>
+
+          {onExportJson ? (
+            <GlassButton
+              onClick={onExportJson}
+              disabled={isGenerating}
+              title="Download full intelligence as JSON"
+            >
+              Export JSON
+            </GlassButton>
+          ) : null}
 
           <GlassButton onClick={onEditPreview} title="Open preview edit mode">
             Edit Preview

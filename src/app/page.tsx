@@ -308,6 +308,49 @@ export default function HomePage() {
     a.click();
   }
 
+  function handleDownloadIntelligenceJson() {
+    const payload = {
+      meta: {
+        exportedAt: new Date().toISOString(),
+        app: "Mark-Down",
+        version: "0.1.0",
+        schemaVersion: "e1",
+      },
+      input: {
+        rawText,
+        normalizedText: effectiveNormalized ?? rawText,
+        docTitle,
+        inferSemanticHeadings,
+      },
+      normalization: {
+        notes,
+        stats,
+      },
+      intelligence: intelligence ?? null,
+      diagnostics: diagnostics ?? null,
+      parse: {
+        parseError: parseError ?? null,
+      },
+    };
+
+    const json = JSON.stringify(payload, null, 2);
+    const blob = new Blob([json], {
+      type: "application/json;charset=utf-8",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    a.download = `doc_intelligence_${timestamp}.json`;
+
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+
+    URL.revokeObjectURL(url);
+  }
+
   function handleEditPreview() {
     saveSession({
       rawText,
@@ -327,6 +370,7 @@ export default function HomePage() {
       <TopBar
         onGeneratePdf={handleGeneratePdf}
         onDownloadPdf={handleDownloadPdf}
+        onExportJson={handleDownloadIntelligenceJson}
         onEditPreview={handleEditPreview}
         onToggleSettings={() => setSettingsOpen(true)}
         onToggleOptimizer={() => setOptimizerOpen(true)}
