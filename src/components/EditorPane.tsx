@@ -12,12 +12,12 @@ export default function EditorPane({ value, onChange, onLoadSample }: Props) {
   return (
     <section className="flex h-full flex-col">
       <div className="flex items-center justify-between border-b px-3 py-2">
-        <div className="text-sm font-semibold">Editor</div>
+        <div className="text-sm font-semibold text-white/90">Editor</div>
 
         <div className="flex items-center gap-2">
-          <label className="text-xs text-gray-500">Load sample</label>
+          <label className="text-xs text-white/70">Load sample</label>
           <select
-            className="rounded-md border bg-white px-2 py-1 text-sm"
+            className="rounded-md border border-white/20 bg-slate-900 px-2 py-1 text-sm text-white"
             defaultValue="none"
             onChange={(e) => {
               const v = e.target.value;

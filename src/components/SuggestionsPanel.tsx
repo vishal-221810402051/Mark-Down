@@ -104,9 +104,9 @@ export default function SuggestionsPanel(props: Props) {
         <div className="h-full border-l border-white/10 bg-gradient-to-b from-slate-950/85 to-slate-900/85 backdrop-blur-2xl">
           <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
             <div>
-              <div className="text-sm font-semibold text-white">Layout Optimizer</div>
+              <div className="text-sm font-semibold text-white">Suggestions</div>
               <div className="text-xs text-white/60">
-                Suggestions only - apply/revert
+                Review and apply improvements
               </div>
             </div>
             <button

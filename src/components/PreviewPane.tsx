@@ -341,7 +341,7 @@ export default function PreviewPane({
     <section className="flex h-full flex-col">
       <div className="flex items-center justify-between border-b px-3 py-2">
         <div className="text-sm font-semibold">{title}</div>
-        <div className="text-xs text-gray-500">Paper view</div>
+        <div className="text-xs text-gray-500">Print preview</div>
       </div>
 
       <div ref={previewScrollRef} className="flex-1 overflow-auto bg-gray-50 p-4">

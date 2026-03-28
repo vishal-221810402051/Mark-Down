@@ -113,8 +113,8 @@ export default function TopBar({
           </GlassButton>
 
           {onToggleDocMap ? (
-            <GlassButton onClick={onToggleDocMap} title="Toggle Document Map">
-              {showDocMap ? "Hide Map" : "Show Map"}
+            <GlassButton onClick={onToggleDocMap} title="Toggle document structure">
+              {showDocMap ? "Hide Structure" : "Show Structure"}
             </GlassButton>
           ) : null}
 
@@ -124,9 +124,9 @@ export default function TopBar({
 
           <GlassButton
             onClick={onToggleOptimizer}
-            title="Layout optimizer (suggestions)"
+            title="Open suggestions"
           >
-            Optimizer {suggestionCount > 0 ? `(${suggestionCount})` : ""}
+            Suggestions {suggestionCount > 0 ? `(${suggestionCount})` : ""}
           </GlassButton>
         </div>
       </div>

@@ -51,11 +51,11 @@ function fixNumberingBrackets(text: string) {
 }
 
 function hasBulletDots(text: string) {
-  return /^\s*[â€¢â€“]\s+/m.test(text);
+  return /^\s*[•–]\s+/m.test(text);
 }
 
 function fixBulletDots(text: string) {
-  return text.replace(/^\s*[â€¢â€“]\s+/gm, "- ");
+  return text.replace(/^\s*[•–]\s+/gm, "- ");
 }
 
 function likelyUnfencedCode(text: string) {
@@ -578,7 +578,7 @@ export function generateSuggestions(
   if (hasBulletDots(rawText)) {
     suggestions.push({
       id: uid("bullets_normalize"),
-      title: "Normalize bullets (â€¢/â€“ -> -)",
+      title: "Normalize bullets (•/– -> -)",
       rationale: "Ensures lists render correctly in Markdown and PDF.",
       patches: [patch("raw", fixBulletDots), patch("normalized", fixBulletDots)],
     });

@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -397,28 +397,34 @@ export default function HomePage() {
         <div className="doc-card h-[calc(100vh-8rem)] overflow-hidden">
           <div className="flex h-full flex-col">
             <div className="flex items-center justify-between border-b px-3 py-2">
-              <div className="text-sm font-semibold text-gray-800">Preview</div>
+              <div className="text-sm font-semibold text-white/90">Preview</div>
 
-              <label className="flex items-center gap-2 text-xs text-slate-300">
+              <label className="flex items-center gap-2 text-xs text-slate-200">
                 <input
                   type="checkbox"
                   className="h-4 w-4"
                   checked={showNormalized}
                   onChange={(e) => setShowNormalized(e.target.checked)}
                 />
-                Show normalized
+                Show processed text
               </label>
             </div>
+            {parseError ? (
+              <div className="mx-3 mt-2 rounded-xl border border-amber-300/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
+                <div className="font-semibold text-amber-200">Preview warning</div>
+                <div className="mt-1">Could not fully parse the document: {parseError}</div>
+              </div>
+            ) : null}
             {!showNormalized && intelligence && !showDocMap ? (
               <div className="mx-3 mt-2 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-xs text-slate-200">
                 <div className="font-semibold text-white/90">Document Intelligence</div>
                 <div className="mt-1">
-                  Headings: {intelligence.stats.headings} · Code:{" "}
-                  {intelligence.stats.codeBlocks} · Commands:{" "}
-                  {intelligence.stats.commandBlocks} · Tables:{" "}
-                  {intelligence.stats.tables} · Diagrams:{" "}
-                  {intelligence.stats.diagrams} · Procedures:{" "}
-                  {intelligence.stats.procedures} · Callouts:{" "}
+                  Headings: {intelligence.stats.headings} • Code:{" "}
+                  {intelligence.stats.codeBlocks} • Commands:{" "}
+                  {intelligence.stats.commandBlocks} • Tables:{" "}
+                  {intelligence.stats.tables} • Diagrams:{" "}
+                  {intelligence.stats.diagrams} • Procedures:{" "}
+                  {intelligence.stats.procedures} • Callouts:{" "}
                   {intelligence.stats.callouts}
                 </div>
               </div>
@@ -520,3 +526,4 @@ export default function HomePage() {
     </div>
   );
 }
+

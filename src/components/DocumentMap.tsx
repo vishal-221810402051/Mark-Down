@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState } from "react";
 import type { ReactNode, RefObject } from "react";
@@ -81,6 +81,11 @@ function scrollToTarget(
   scroller.scrollTo({ top, behavior: "smooth" });
 }
 
+function toSentenceCase(text: string): string {
+  const withSpaces = text.replace(/_/g, " ").trim();
+  return withSpaces.charAt(0).toUpperCase() + withSpaces.slice(1);
+}
+
 export default function DocumentMap({
   intelligence,
   diagnostics,
@@ -119,7 +124,10 @@ export default function DocumentMap({
   }
 
   for (const arr of groupsByParentId.values()) {
-    arr.sort((a, b) => (a.startLine ?? Number.MAX_SAFE_INTEGER) - (b.startLine ?? Number.MAX_SAFE_INTEGER));
+    arr.sort(
+      (a, b) =>
+        (a.startLine ?? Number.MAX_SAFE_INTEGER) - (b.startLine ?? Number.MAX_SAFE_INTEGER),
+    );
   }
 
   const rootGroups = groups.filter(
@@ -133,18 +141,17 @@ export default function DocumentMap({
     DocStructuralGroup["kind"],
     { icon: string; label: string }
   > = {
-    procedure_block: { icon: "⚙", label: "Procedure" },
-    entity_group: { icon: "🧩", label: "Entities" },
-    phase_block: { icon: "📍", label: "Phase" },
-    list_section: { icon: "•", label: "List" },
-    prose_section: { icon: "•", label: "Prose" },
-    table_section: { icon: "•", label: "Table" },
+    procedure_block: { icon: "[P]", label: "Procedure" },
+    entity_group: { icon: "[E]", label: "Entities" },
+    phase_block: { icon: "[PH]", label: "Phase" },
+    list_section: { icon: "-", label: "List" },
+    prose_section: { icon: "-", label: "Prose" },
+    table_section: { icon: "-", label: "Table" },
   };
-
   const formatGroupLabel = (group: DocStructuralGroup) => {
     const meta = groupKindMeta[group.kind];
     const titleLabel = group.title?.trim() || "Untitled";
-    return `${meta.label} — ${titleLabel}`;
+    return `${meta.label} - ${titleLabel}`;
   };
 
   const renderGroupRow = (
@@ -158,55 +165,56 @@ export default function DocumentMap({
         : null;
 
     return (
-    <button
-      key={group.id}
-      type="button"
-      style={{
-        paddingLeft: "24px",
-        opacity: 0.85,
-        fontSize: "13px",
-        color: "rgba(255,255,255,0.7)",
-      }}
-      className={`mb-1 block w-full rounded-lg py-1 text-left hover:bg-white/5 ${
-        isActiveGroup ? "bg-white/10" : ""
-      }`}
-      onClick={() => {
-        onSelectGroup?.(group);
-        if (parentHeadingId) {
-          scrollToTarget(previewScrollRef, parentHeadingId);
-        }
-      }}
-    >
-      <span>
-        {groupKindMeta[group.kind].icon} {formatGroupLabel(group)}
-      </span>
-      {confidencePct ? (
-        <span
-          style={{
-            marginLeft: "6px",
-            fontSize: "11px",
-            opacity: 0.7,
-          }}
-        >
-          {confidencePct}
+      <button
+        key={group.id}
+        type="button"
+        style={{
+          paddingLeft: "24px",
+          opacity: 0.85,
+          fontSize: "13px",
+          color: "rgba(255,255,255,0.7)",
+        }}
+        className={`mb-1 block w-full rounded-lg py-1 text-left hover:bg-white/5 ${
+          isActiveGroup ? "bg-white/10" : ""
+        }`}
+        onClick={() => {
+          onSelectGroup?.(group);
+          if (parentHeadingId) {
+            scrollToTarget(previewScrollRef, parentHeadingId);
+          }
+        }}
+      >
+        <span>
+          {groupKindMeta[group.kind].icon} {formatGroupLabel(group)}
         </span>
-      ) : null}
-    </button>
+        {confidencePct ? (
+          <span
+            style={{
+              marginLeft: "6px",
+              fontSize: "11px",
+              opacity: 0.7,
+            }}
+          >
+            {confidencePct}
+          </span>
+        ) : null}
+      </button>
     );
   };
 
   return (
     <aside className="h-full overflow-auto rounded-2xl border border-white/10 bg-black/25 p-3 backdrop-blur-2xl shadow-[0_18px_45px_rgba(0,0,0,0.35)]">
       <div className="mb-3">
-        <div className="text-sm font-bold text-white/95">Document Map</div>
+        <div className="text-sm font-bold text-white/95">Document Structure</div>
         {title ? <div className="text-xs text-white/70">{title}</div> : null}
         {intelligence ? (
           <div className="mt-1 text-xs leading-5 text-white/55">
-            {intelligence.stats.headings} headings · {intelligence.stats.commandBlocks} commands
-            · {intelligence.stats.tables} tables · {intelligence.stats.diagrams} diagrams ·{" "}
+            {intelligence.stats.headings} headings | {intelligence.stats.commandBlocks} commands
+            | {intelligence.stats.tables} tables | {intelligence.stats.diagrams} diagrams |{" "}
             {intelligence.stats.procedures} procedures
           </div>
-        ) : null}      </div>
+        ) : null}
+      </div>
 
       {diagnostics && diagnostics.items.length > 0 ? (
         <div className="mb-3 rounded-2xl border border-white/10 bg-white/5 px-3 py-3">
@@ -214,17 +222,17 @@ export default function DocumentMap({
             Diagnostics
           </div>
           <div className="mt-1 text-xs text-white/55">
-            {diagnostics.summary.error} errors · {diagnostics.summary.warning} warnings ·{" "}
+            {diagnostics.summary.error} errors | {diagnostics.summary.warning} warnings |{" "}
             {diagnostics.summary.info} info
           </div>
           {diagnostics?.documentType && (
             <div className="mt-2 text-xs text-white/50">
-              Document type: {diagnostics.documentType}
+              Document type: {toSentenceCase(diagnostics.documentType)}
             </div>
           )}
           {diagnostics?.hierarchyGrade && (
             <div className="text-xs text-white/50">
-              Heading structure: {diagnostics.hierarchyGrade}
+              Heading structure: {toSentenceCase(diagnostics.hierarchyGrade)}
             </div>
           )}
           <div className="mt-3 space-y-2">
@@ -244,7 +252,7 @@ export default function DocumentMap({
       ) : null}
 
       <div className="space-y-3">
-        <Group title="Document-level groups" count={rootGroups.length} defaultOpen={false}>
+        <Group title="Global groups" count={rootGroups.length} defaultOpen={false}>
           {rootGroups.map((group) => renderGroupRow(group))}
         </Group>
 
@@ -255,30 +263,30 @@ export default function DocumentMap({
             const collapsed = collapsedSections[h.id] ?? false;
 
             return (
-            <div key={h.id}>
-              <Item
-                label={h.text}
-                sublabel={`H${h.level}${groupCount > 0 ? ` · ${groupCount} groups` : ""}`}
-                active={activeHeadingId === h.id}
-                onClick={() => scrollToTarget(previewScrollRef, h.id)}
-              />
-              {groupCount > 0 ? (
-                <button
-                  type="button"
-                  onClick={() =>
-                    setCollapsedSections((prev) => ({
-                      ...prev,
-                      [h.id]: !collapsed,
-                    }))
-                  }
-                  className="mb-1 ml-3 rounded-lg px-2 py-1 text-xs text-white/60 hover:bg-white/8 hover:text-white/80"
-                >
-                  {collapsed ? "Show groups" : "Hide groups"}
-                </button>
-              ) : null}
-              {!collapsed ? childGroups.map((group) => renderGroupRow(group, h.id)) : null}
-            </div>
-          );
+              <div key={h.id}>
+                <Item
+                  label={h.text}
+                  sublabel={groupCount > 0 ? `${groupCount} groups` : undefined}
+                  active={activeHeadingId === h.id}
+                  onClick={() => scrollToTarget(previewScrollRef, h.id)}
+                />
+                {groupCount > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setCollapsedSections((prev) => ({
+                        ...prev,
+                        [h.id]: !collapsed,
+                      }))
+                    }
+                    className="mb-1 ml-3 rounded-lg px-2 py-1 text-xs text-white/60 hover:bg-white/8 hover:text-white/80"
+                  >
+                    {collapsed ? "Show groups" : "Hide groups"}
+                  </button>
+                ) : null}
+                {!collapsed ? childGroups.map((group) => renderGroupRow(group, h.id)) : null}
+              </div>
+            );
           })}
         </Group>
 
@@ -340,10 +348,12 @@ export default function DocumentMap({
           ))}
         </Group>
 
-        <Group title="Other groups" count={otherGroups.length} defaultOpen={false}>
+        <Group title="Unassigned groups" count={otherGroups.length} defaultOpen={false}>
           {otherGroups.map((group) => renderGroupRow(group))}
         </Group>
       </div>
     </aside>
   );
 }
+
+
