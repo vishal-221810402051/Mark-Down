@@ -42,6 +42,25 @@ export type BenchmarkMetrics = {
   truncatedTableRowCount: number;
   tableMergeRiskCount: number;
   weakHierarchySignalCount: number;
+  groupCounts: {
+    entity_group: number;
+    procedure_block: number;
+    phase_block: number;
+    list_section: number;
+  };
+  groupSafety: {
+    overlaps: number;
+    duplicates: number;
+    boundaryIssues: number;
+  };
+  coverage: {
+    weakDocActivation: number;
+  };
+  confidence: {
+    avg: number;
+    min: number;
+    max: number;
+  };
 };
 
 export type ScoreBreakdown = {
@@ -52,6 +71,16 @@ export type ScoreBreakdown = {
   entityDetection: number;
   categoryFitness: number;
   finalScore: number;
+  scoreModel?: "legacy" | "b4";
+  legacyFinalScore?: number;
+  b4FinalScore?: number;
+  b4?: {
+    structure: number;
+    groupingAccuracy: number;
+    safety: number;
+    coverage: number;
+    confidenceQuality: number;
+  };
 };
 
 export type BenchmarkFingerprintInfo = {
@@ -150,11 +179,16 @@ export type CategorySummary = {
   category: BenchmarkCategory;
   count: number;
   avgScore: number;
+  avgLegacyScore: number;
+  avgB4Score: number;
   minScore: number;
   maxScore: number;
   avgHeadings: number;
   avgEntities: number;
   avgTables: number;
+  avgGroups: number;
+  avgGroupSafetyIssues: number;
+  avgGroupConfidence: number;
   riskCount: number;
 };
 
@@ -164,6 +198,9 @@ export type BenchmarkRunResult = {
   outputRoot: string;
   totalDocs: number;
   avgScore: number;
+  scoreModel: "legacy" | "b4";
+  avgLegacyScore: number;
+  avgB4Score: number;
   categorySummaries: CategorySummary[];
   duplicateAnalysis: {
     summary: BenchmarkDuplicateSummary;

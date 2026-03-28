@@ -46,6 +46,8 @@ type EvaluatedDoc = {
   similarityProfile: SimilarityProfile;
 };
 
+type ScoreModel = "legacy" | "b4";
+
 const CATEGORY_ORDER: BenchmarkCategory[] = [
   "technical",
   "research",
@@ -89,6 +91,15 @@ function parseArg(args: string[], name: string): string | null {
   const idx = args.indexOf(name);
   if (idx === -1) return null;
   return args[idx + 1] ?? null;
+}
+
+function parseArgValue(args: string[], name: string): string | null {
+  const direct = parseArg(args, name);
+  if (direct !== null) return direct;
+  const prefix = `${name}=`;
+  const matched = args.find((arg) => arg.startsWith(prefix));
+  if (!matched) return null;
+  return matched.slice(prefix.length) || null;
 }
 
 function sha256(text: string): string {
@@ -466,6 +477,196 @@ function computeScores(
   };
 }
 
+function countGroupOverlaps(
+  groups: Array<{ startLine?: number; endLine?: number }>,
+): number {
+  let overlaps = 0;
+  for (let i = 0; i < groups.length; i++) {
+    for (let j = i + 1; j < groups.length; j++) {
+      const a = groups[i];
+      const b = groups[j];
+      if (
+        typeof a?.startLine !== "number" ||
+        typeof a?.endLine !== "number" ||
+        typeof b?.startLine !== "number" ||
+        typeof b?.endLine !== "number"
+      ) {
+        continue;
+      }
+      const start = Math.max(a.startLine, b.startLine);
+      const end = Math.min(a.endLine, b.endLine);
+      if (end >= start) overlaps++;
+    }
+  }
+  return overlaps;
+}
+
+function countGroupDuplicates(
+  groups: Array<{
+    kind?: string;
+    title?: string;
+    parentId?: string;
+    startLine?: number;
+    endLine?: number;
+  }>,
+): number {
+  const keyCount = new Map<string, number>();
+  for (const g of groups) {
+    const key = [
+      g.kind ?? "",
+      (g.title ?? "").trim().toLowerCase(),
+      g.parentId ?? "root",
+      typeof g.startLine === "number" ? g.startLine : -1,
+      typeof g.endLine === "number" ? g.endLine : -1,
+    ].join("|");
+    keyCount.set(key, (keyCount.get(key) ?? 0) + 1);
+  }
+
+  let duplicates = 0;
+  for (const count of keyCount.values()) {
+    if (count > 1) duplicates += count - 1;
+  }
+  return duplicates;
+}
+
+function countGroupBoundaryIssues(
+  groups: Array<{ startLine?: number; endLine?: number; kind?: string }>,
+  normalizedText: string,
+): number {
+  const lines = normalizedText.replace(/\r\n/g, "\n").split("\n");
+  let issues = 0;
+
+  for (const g of groups) {
+    const start = g.startLine ?? -1;
+    const end = g.endLine ?? -1;
+
+    if (start <= 0 || end <= 0 || end < start) {
+      issues++;
+      continue;
+    }
+
+    if (end - start + 1 > 10) {
+      issues++;
+      continue;
+    }
+
+    const slice = lines.slice(start - 1, end);
+    let hasIssue = false;
+    for (const raw of slice) {
+      const line = (raw ?? "").trim();
+      if (!line) continue;
+      if (/^\|.*\|$/.test(line)) {
+        hasIssue = true;
+        break;
+      }
+      if (/^#{1,6}\s+/.test(line) && (g.kind ?? "") !== "phase_block") {
+        hasIssue = true;
+        break;
+      }
+      if (/^```/.test(line)) {
+        hasIssue = true;
+        break;
+      }
+      if (/^\s*(graph|flowchart|sequenceDiagram|classDiagram|stateDiagram|erDiagram|journey|gantt)\b/.test(line)) {
+        hasIssue = true;
+        break;
+      }
+    }
+
+    if (hasIssue) issues++;
+  }
+
+  return issues;
+}
+
+function computeScoresB4(
+  category: BenchmarkCategory,
+  metrics: BenchmarkMetrics,
+): ScoreBreakdown {
+  const structure = clamp(
+    (metrics.headingCount >= 3 ? 10 : metrics.headingCount > 0 ? 5 : 0) +
+      (metrics.sectionCount >= 2 ? 8 : metrics.sectionCount > 0 ? 4 : 0) +
+      (metrics.subsectionCount > 0 ? 5 : 0) +
+      (metrics.tableCount > 0 ? 4 : 0) +
+      (metrics.weakHierarchySignalCount > 0 ? -3 : 0),
+    0,
+    30,
+  );
+
+  const expectsEntityGroup = category === "technical";
+  const expectsProcedureBlock = category === "tutorials" || category === "sop";
+  const expectsPhaseBlock = category === "roadmaps" || category === "business";
+
+  const entityScore = expectsEntityGroup
+    ? metrics.groupCounts.entity_group > 0
+      ? 10
+      : 0
+    : 10;
+  const procedureScore = expectsProcedureBlock
+    ? metrics.groupCounts.procedure_block > 0
+      ? 10
+      : 0
+    : 10;
+  const phaseScore = expectsPhaseBlock
+    ? metrics.groupCounts.phase_block > 0
+      ? 10
+      : 0
+    : 10;
+  const groupingAccuracy = clamp(entityScore + procedureScore + phaseScore, 0, 30);
+
+  const safety = clamp(
+    20 -
+      metrics.groupSafety.overlaps * 2 -
+      metrics.groupSafety.duplicates * 2 -
+      metrics.groupSafety.boundaryIssues * 3,
+    0,
+    20,
+  );
+
+  const weakDoc = metrics.headingCount < 3 && metrics.sectionCount < 2;
+  const coverage = weakDoc ? (metrics.coverage.weakDocActivation > 0 ? 10 : 0) : 10;
+
+  let confidenceQuality = 10;
+  const avgConfidence = metrics.confidence.avg;
+  const hasGroups =
+    metrics.groupCounts.entity_group +
+      metrics.groupCounts.procedure_block +
+      metrics.groupCounts.phase_block +
+      metrics.groupCounts.list_section >
+    0;
+  if (hasGroups) {
+    if (avgConfidence < 0.7) {
+      confidenceQuality = clamp((avgConfidence / 0.7) * 10, 0, 10);
+    } else if (avgConfidence > 0.95) {
+      confidenceQuality = clamp((1 - (avgConfidence - 0.95) / 0.2) * 10, 0, 10);
+    }
+  }
+
+  const finalScore = clamp(
+    Math.round(structure + groupingAccuracy + safety + coverage + confidenceQuality),
+    0,
+    100,
+  );
+
+  return {
+    hierarchyRichness: round2(structure),
+    structuralConsistency: round2(groupingAccuracy),
+    tableStability: round2(safety),
+    labelDetection: round2(coverage),
+    entityDetection: round2(confidenceQuality),
+    categoryFitness: 0,
+    finalScore,
+    scoreModel: "b4",
+    b4: {
+      structure: round2(structure),
+      groupingAccuracy: round2(groupingAccuracy),
+      safety: round2(safety),
+      coverage: round2(coverage),
+      confidenceQuality: round2(confidenceQuality),
+    },
+  };
+}
+
 function duplicateMember(doc: BenchmarkDocResult): BenchmarkDuplicateGroupMember {
   return {
     docId: doc.docId,
@@ -792,10 +993,26 @@ function buildDuplicateAnalysis(
 }
 
 function markdownSummary(result: BenchmarkRunResult): string {
+  const docs = result.docs;
+  const totalEntityGroups = docs.reduce((acc, d) => acc + d.metrics.groupCounts.entity_group, 0);
+  const totalProcedureBlocks = docs.reduce(
+    (acc, d) => acc + d.metrics.groupCounts.procedure_block,
+    0,
+  );
+  const totalPhaseBlocks = docs.reduce((acc, d) => acc + d.metrics.groupCounts.phase_block, 0);
+  const totalListSections = docs.reduce((acc, d) => acc + d.metrics.groupCounts.list_section, 0);
+  const totalGroupOverlaps = docs.reduce((acc, d) => acc + d.metrics.groupSafety.overlaps, 0);
+  const totalGroupDuplicates = docs.reduce((acc, d) => acc + d.metrics.groupSafety.duplicates, 0);
+  const totalGroupBoundaryIssues = docs.reduce(
+    (acc, d) => acc + d.metrics.groupSafety.boundaryIssues,
+    0,
+  );
+  const avgGroupConfidence = round2(mean(docs.map((d) => d.metrics.confidence.avg)));
+
   const categoryRows = result.categorySummaries
     .map(
       (s) =>
-        `| ${s.category} | ${s.count} | ${s.avgScore} | ${s.minScore} | ${s.maxScore} | ${s.avgHeadings} | ${s.avgEntities} | ${s.avgTables} | ${s.riskCount} |`,
+        `| ${s.category} | ${s.count} | ${s.avgScore} | ${s.avgLegacyScore} | ${s.avgB4Score} | ${s.minScore} | ${s.maxScore} | ${s.avgHeadings} | ${s.avgEntities} | ${s.avgTables} | ${s.avgGroups} | ${s.avgGroupSafetyIssues} | ${s.avgGroupConfidence} | ${s.riskCount} |`,
     )
     .join("\n");
 
@@ -856,12 +1073,15 @@ function markdownSummary(result: BenchmarkRunResult): string {
     "",
     `Generated: ${result.generatedAt}`,
     `Total docs: ${result.totalDocs}`,
+    `Score model: ${result.scoreModel}`,
     `Average score: ${result.avgScore}`,
+    `Average legacy score: ${result.avgLegacyScore}`,
+    `Average B4 score: ${result.avgB4Score}`,
     "",
     "## Category Scores",
     "",
-    "| Category | Docs | Avg | Min | Max | Avg Headings | Avg Entities | Avg Tables | Risks |",
-    "|---|---:|---:|---:|---:|---:|---:|---:|---:|",
+    "| Category | Docs | Avg | Legacy Avg | B4 Avg | Min | Max | Avg Headings | Avg Entities | Avg Tables | Avg Groups | Avg Group Safety Issues | Avg Group Confidence | Risks |",
+    "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     categoryRows,
     "",
     "## Top 10 Documents",
@@ -875,6 +1095,17 @@ function markdownSummary(result: BenchmarkRunResult): string {
     "| Doc ID | Category | Score | Path |",
     "|---|---|---:|---|",
     worstRows,
+    "",
+    "## Grouping & B4 Signals",
+    "",
+    `- entity_group total: ${totalEntityGroups}`,
+    `- procedure_block total: ${totalProcedureBlocks}`,
+    `- phase_block total: ${totalPhaseBlocks}`,
+    `- list_section total: ${totalListSections}`,
+    `- group overlaps: ${totalGroupOverlaps}`,
+    `- group duplicates: ${totalGroupDuplicates}`,
+    `- group boundary issues: ${totalGroupBoundaryIssues}`,
+    `- average group confidence: ${avgGroupConfidence}`,
     "",
     "## Duplicate Analysis",
     "",
@@ -1012,7 +1243,11 @@ function markdownSuspicious(result: BenchmarkRunResult): string {
   return sections.join("\n");
 }
 
-async function evaluateDoc(entry: DocEntry, inferSemanticHeadings: boolean): Promise<EvaluatedDoc> {
+async function evaluateDoc(
+  entry: DocEntry,
+  inferSemanticHeadings: boolean,
+  scoreModel: ScoreModel,
+): Promise<EvaluatedDoc> {
   const rawText = await fs.readFile(entry.absPath, "utf8");
   const { normalizedText, notes, stats } = normalizeInput(rawText, {
     inferSemanticHeadings,
@@ -1035,6 +1270,7 @@ async function evaluateDoc(entry: DocEntry, inferSemanticHeadings: boolean): Pro
   });
 
   const hierarchy = parsed.intelligence.hierarchy ?? [];
+  const groups = parsed.intelligence.groups ?? [];
   const headings = parsed.headings;
   const sectionCount = hierarchy.filter((n) => n.role === "section").length;
   const subsectionCount = hierarchy.filter((n) => n.role === "subsection").length;
@@ -1069,6 +1305,38 @@ async function evaluateDoc(entry: DocEntry, inferSemanticHeadings: boolean): Pro
     (sectionCount === 0 ? 1 : 0) +
     (hierarchy.length < 2 ? 1 : 0);
 
+  const groupCounts = {
+    entity_group: groups.filter((g) => g.kind === "entity_group").length,
+    procedure_block: groups.filter((g) => g.kind === "procedure_block").length,
+    phase_block: groups.filter((g) => g.kind === "phase_block").length,
+    list_section: groups.filter((g) => g.kind === "list_section").length,
+  };
+  const groupSafety = {
+    overlaps: countGroupOverlaps(groups),
+    duplicates: countGroupDuplicates(groups),
+    boundaryIssues: countGroupBoundaryIssues(groups, normalizedText),
+  };
+  const weakDoc = headings.length < 3 && sectionCount < 2;
+  const coverage = {
+    weakDocActivation:
+      weakDoc &&
+      (groupCounts.entity_group +
+        groupCounts.procedure_block +
+        groupCounts.phase_block +
+        groupCounts.list_section >
+        0)
+        ? 1
+        : 0,
+  };
+  const confidenceValues = groups
+    .map((g) => g.confidence)
+    .filter((v): v is number => typeof v === "number");
+  const confidence = {
+    avg: confidenceValues.length > 0 ? round2(mean(confidenceValues)) : 0,
+    min: confidenceValues.length > 0 ? round2(Math.min(...confidenceValues)) : 0,
+    max: confidenceValues.length > 0 ? round2(Math.max(...confidenceValues)) : 0,
+  };
+
   const metrics: BenchmarkMetrics = {
     wordCount,
     paragraphCount,
@@ -1090,6 +1358,10 @@ async function evaluateDoc(entry: DocEntry, inferSemanticHeadings: boolean): Pro
     truncatedTableRowCount: tableSignals.truncatedRows,
     tableMergeRiskCount: tableSignals.mergeRisk,
     weakHierarchySignalCount,
+    groupCounts,
+    groupSafety,
+    coverage,
+    confidence,
   };
 
   const risks: BenchmarkRisk[] = [];
@@ -1130,6 +1402,41 @@ async function evaluateDoc(entry: DocEntry, inferSemanticHeadings: boolean): Pro
   if ((entry.category === "tutorials" || entry.category === "sop") && metrics.procedureLabelCount === 0) {
     addRisk(risks, "procedure_labels_missing", "error", "Expected procedure/checklist labels were not detected");
   }
+  if (metrics.groupSafety.overlaps > 0) {
+    addRisk(
+      risks,
+      "group_overlap_conflict",
+      "warning",
+      "Overlapping structural groups detected",
+      metrics.groupSafety.overlaps,
+    );
+  }
+  if (metrics.groupSafety.duplicates > 0) {
+    addRisk(
+      risks,
+      "group_duplicate_conflict",
+      "warning",
+      "Duplicate structural groups detected",
+      metrics.groupSafety.duplicates,
+    );
+  }
+  if (metrics.groupSafety.boundaryIssues > 0) {
+    addRisk(
+      risks,
+      "group_boundary_issue",
+      "warning",
+      "Group boundary safety issues detected",
+      metrics.groupSafety.boundaryIssues,
+    );
+  }
+  if (weakDoc && metrics.coverage.weakDocActivation === 0) {
+    addRisk(
+      risks,
+      "weak_doc_grouping_missing",
+      "warning",
+      "Weak document produced no structural grouping activation",
+    );
+  }
 
   const categoryEval = evaluateCategory(entry.category, metrics, normalizedText, headings);
   risks.push(...categoryEval.risks);
@@ -1138,13 +1445,29 @@ async function evaluateDoc(entry: DocEntry, inferSemanticHeadings: boolean): Pro
     (i) => i.kind === "heading_hierarchy_issue",
   ).length;
 
-  const score: ScoreBreakdown = computeScores(
+  const legacyScore: ScoreBreakdown = computeScores(
     entry.category,
     metrics,
     risks.length,
     categoryEval.score01,
     headingHierarchyIssueCount,
   );
+  const b4Score = computeScoresB4(entry.category, metrics);
+  const score: ScoreBreakdown =
+    scoreModel === "b4"
+      ? {
+          ...b4Score,
+          scoreModel: "b4",
+          legacyFinalScore: legacyScore.finalScore,
+          b4FinalScore: b4Score.finalScore,
+        }
+      : {
+          ...legacyScore,
+          scoreModel: "legacy",
+          legacyFinalScore: legacyScore.finalScore,
+          b4FinalScore: b4Score.finalScore,
+          b4: b4Score.b4,
+        };
 
   const result: BenchmarkDocResult = {
     docId: entry.docId,
@@ -1190,15 +1513,41 @@ function summarizeByCategory(results: BenchmarkDocResult[]): CategorySummary[] {
   return CATEGORY_ORDER.map((category) => {
     const docs = results.filter((r) => r.category === category);
     const scores = docs.map((d) => d.score.finalScore);
+    const legacyScores = docs.map((d) => d.score.legacyFinalScore ?? d.score.finalScore);
+    const b4Scores = docs.map((d) => d.score.b4FinalScore ?? d.score.finalScore);
     return {
       category,
       count: docs.length,
       avgScore: round2(mean(scores)),
+      avgLegacyScore: round2(mean(legacyScores)),
+      avgB4Score: round2(mean(b4Scores)),
       minScore: docs.length ? Math.min(...scores) : 0,
       maxScore: docs.length ? Math.max(...scores) : 0,
       avgHeadings: round2(mean(docs.map((d) => d.metrics.headingCount))),
       avgEntities: round2(mean(docs.map((d) => d.metrics.entityCount))),
       avgTables: round2(mean(docs.map((d) => d.metrics.tableCount))),
+      avgGroups: round2(
+        mean(
+          docs.map(
+            (d) =>
+              d.metrics.groupCounts.entity_group +
+              d.metrics.groupCounts.procedure_block +
+              d.metrics.groupCounts.phase_block +
+              d.metrics.groupCounts.list_section,
+          ),
+        ),
+      ),
+      avgGroupSafetyIssues: round2(
+        mean(
+          docs.map(
+            (d) =>
+              d.metrics.groupSafety.overlaps +
+              d.metrics.groupSafety.duplicates +
+              d.metrics.groupSafety.boundaryIssues,
+          ),
+        ),
+      ),
+      avgGroupConfidence: round2(mean(docs.map((d) => d.metrics.confidence.avg))),
       riskCount: docs.reduce((acc, d) => acc + d.risks.length, 0),
     };
   });
@@ -1222,6 +1571,8 @@ async function main() {
   const docsRoot = path.resolve(process.cwd(), parseArg(args, "--docs") ?? "benchmark_docs");
   const outputRoot = path.resolve(process.cwd(), parseArg(args, "--out") ?? "benchmark_results");
   const inferSemanticHeadings = args.includes("--infer-semantic-headings");
+  const scoreModelArg = (parseArgValue(args, "--score-model") ?? "legacy").toLowerCase();
+  const scoreModel: ScoreModel = scoreModelArg === "b4" ? "b4" : "legacy";
 
   const docs = await listBenchmarkDocs(docsRoot);
   if (docs.length === 0) {
@@ -1234,13 +1585,19 @@ async function main() {
   const similarityProfiles: SimilarityProfile[] = [];
   for (const doc of docs) {
     // Sequential execution keeps memory and Shiki overhead predictable.
-    const evaluated = await evaluateDoc(doc, inferSemanticHeadings);
+    const evaluated = await evaluateDoc(doc, inferSemanticHeadings, scoreModel);
     results.push(evaluated.result);
     similarityProfiles.push(evaluated.similarityProfile);
   }
 
   const categorySummaries = summarizeByCategory(results);
   const avgScore = round2(mean(results.map((r) => r.score.finalScore)));
+  const avgLegacyScore = round2(
+    mean(results.map((r) => r.score.legacyFinalScore ?? r.score.finalScore)),
+  );
+  const avgB4Score = round2(
+    mean(results.map((r) => r.score.b4FinalScore ?? r.score.finalScore)),
+  );
   const scoreInterpretation = buildScoreInterpretation(results, avgScore);
   const duplicateAnalysis = buildDuplicateAnalysis(
     results,
@@ -1281,6 +1638,9 @@ async function main() {
     outputRoot,
     totalDocs: results.length,
     avgScore,
+    scoreModel,
+    avgLegacyScore,
+    avgB4Score,
     categorySummaries,
     duplicateAnalysis,
     scoreInterpretation,
@@ -1308,7 +1668,10 @@ async function main() {
   );
 
   console.log(`Benchmark complete: ${results.length} docs`);
+  console.log(`Score model: ${scoreModel}`);
   console.log(`Average score: ${avgScore}`);
+  console.log(`Average legacy score: ${avgLegacyScore}`);
+  console.log(`Average B4 score: ${avgB4Score}`);
   console.log(`Results written to: ${outputRoot}`);
 }
 
