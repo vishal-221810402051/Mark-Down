@@ -290,3 +290,10 @@
 .doc.table-wide-middle th:nth-child(2), .doc.table-wide-middle td:nth-child(2) { width: 46%; }
 .doc.table-wide-middle th:nth-child(1), .doc.table-wide-middle td:nth-child(1) { width: 27%; }
 .doc.table-wide-middle th:nth-child(3), .doc.table-wide-middle td:nth-child(3) { width: 27%; }
+
+.group-highlight {
+  outline: 2px solid #4ade80;
+  background: rgba(74, 222, 128, 0.14);
+  box-shadow: 0 0 0 4px rgba(74, 222, 128, 0.08);
+  transition: background 0.4s ease, outline-color 0.4s ease, box-shadow 0.4s ease;
+}

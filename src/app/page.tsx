@@ -21,7 +21,7 @@ import { clearSession, loadSession, saveSession } from "@/lib/sessionStore";
 import { SAMPLES } from "@/lib/samples";
 import { generateSuggestions } from "@/lib/suggestions/engine";
 import type { Suggestion } from "@/lib/suggestions/types";
-import type { DocIntelligence } from "@/lib/docIntelligence";
+import type { DocIntelligence, DocStructuralGroup } from "@/lib/docIntelligence";
 
 export default function HomePage() {
   const router = useRouter();
@@ -50,6 +50,7 @@ export default function HomePage() {
   const [intelligence, setIntelligence] = useState<DocIntelligence | null>(null);
   const [parseError, setParseError] = useState<string | null>(null);
   const [activeHeadingId, setActiveHeadingId] = useState<string | null>(null);
+  const [activeGroup, setActiveGroup] = useState<DocStructuralGroup | null>(null);
   const [showDocMap, setShowDocMap] = useState<boolean>(true);
   const previewScrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -462,6 +463,7 @@ export default function HomePage() {
                 renderedHtml={docState.renderedPreview}
                 theme={theme}
                 previewScrollRef={previewScrollRef}
+                activeGroup={activeGroup}
               />
             )}
           </div>
@@ -474,6 +476,8 @@ export default function HomePage() {
               diagnostics={diagnostics}
               previewScrollRef={previewScrollRef}
               activeHeadingId={activeHeadingId}
+              activeGroup={activeGroup}
+              onSelectGroup={setActiveGroup}
             />
           </div>
         ) : null}

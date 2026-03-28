@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import type { RefObject } from "react";
+import type { DocStructuralGroup } from "@/lib/docIntelligence";
 
 export type PreviewTheme = "whitepaper" | "dev" | "academic";
 
@@ -10,6 +11,7 @@ type Props = {
   renderedHtml: string; // sanitized HTML
   theme: PreviewTheme;
   previewScrollRef?: RefObject<HTMLDivElement | null>;
+  activeGroup?: DocStructuralGroup | null;
 };
 
 function isMermaidCodeBlock(codeEl: Element): boolean {
@@ -109,8 +111,11 @@ export default function PreviewPane({
   renderedHtml,
   theme,
   previewScrollRef,
+  activeGroup,
 }: Props) {
   const ref = useRef<HTMLDivElement | null>(null);
+  const activeHighlightTimeoutRef = useRef<number | null>(null);
+  const activeHighlightedElementRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     const root = ref.current;
@@ -252,6 +257,85 @@ export default function PreviewPane({
       if (rafId) cancelAnimationFrame(rafId);
     };
   }, [renderedHtml]);
+
+  useEffect(() => {
+    if (!activeGroup) return;
+
+    const container = previewScrollRef?.current;
+    if (!container) return;
+
+    if (activeHighlightTimeoutRef.current !== null) {
+      window.clearTimeout(activeHighlightTimeoutRef.current);
+      activeHighlightTimeoutRef.current = null;
+    }
+
+    if (activeHighlightedElementRef.current) {
+      activeHighlightedElementRef.current.classList.remove("group-highlight");
+      activeHighlightedElementRef.current = null;
+    }
+
+    let target: HTMLElement | null = null;
+
+    if (activeGroup.parentId) {
+      const candidate = container.querySelector(
+        `#${CSS.escape(activeGroup.parentId)}`,
+      );
+      if (candidate instanceof HTMLElement) {
+        target = candidate;
+      }
+    }
+
+    if (!target && activeGroup.title) {
+      const normalizedTitle = activeGroup.title.trim().toLowerCase();
+      const elements = container.querySelectorAll("*");
+      for (const el of elements) {
+        const text = el.textContent?.trim().toLowerCase();
+        if (!text) continue;
+        if (text.includes(normalizedTitle)) {
+          if (el instanceof HTMLElement) {
+            target = el;
+          }
+          break;
+        }
+      }
+    }
+
+    if (!target) return;
+
+    const targetRect = target.getBoundingClientRect();
+    const containerRect = container.getBoundingClientRect();
+    const offsetTop =
+      targetRect.top - containerRect.top + container.scrollTop - 100;
+
+    container.scrollTo({
+      top: Math.max(0, offsetTop),
+      behavior: "smooth",
+    });
+
+    target.classList.add("group-highlight");
+    activeHighlightedElementRef.current = target;
+
+    activeHighlightTimeoutRef.current = window.setTimeout(() => {
+      if (activeHighlightedElementRef.current) {
+        activeHighlightedElementRef.current.classList.remove("group-highlight");
+        activeHighlightedElementRef.current = null;
+      }
+      activeHighlightTimeoutRef.current = null;
+    }, 4000);
+  }, [activeGroup, previewScrollRef]);
+
+  useEffect(() => {
+    return () => {
+      if (activeHighlightTimeoutRef.current !== null) {
+        window.clearTimeout(activeHighlightTimeoutRef.current);
+        activeHighlightTimeoutRef.current = null;
+      }
+      if (activeHighlightedElementRef.current) {
+        activeHighlightedElementRef.current.classList.remove("group-highlight");
+        activeHighlightedElementRef.current = null;
+      }
+    };
+  }, []);
 
   return (
     <section className="flex h-full flex-col">

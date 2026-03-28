@@ -11,6 +11,8 @@ type Props = {
   diagnostics?: DocDiagnostics | null;
   previewScrollRef: RefObject<HTMLDivElement | null>;
   activeHeadingId?: string | null;
+  activeGroup?: DocStructuralGroup | null;
+  onSelectGroup?: (group: DocStructuralGroup) => void;
 };
 
 type GroupProps = {
@@ -84,6 +86,8 @@ export default function DocumentMap({
   diagnostics,
   previewScrollRef,
   activeHeadingId,
+  activeGroup,
+  onSelectGroup,
 }: Props) {
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
   const sections = intelligence?.headings ?? [];
@@ -146,7 +150,14 @@ export default function DocumentMap({
   const renderGroupRow = (
     group: DocStructuralGroup,
     parentHeadingId?: string,
-  ) => (
+  ) => {
+    const isActiveGroup = activeGroup?.id === group.id;
+    const confidencePct =
+      typeof group.confidence === "number"
+        ? `${Math.round(group.confidence * 100)}%`
+        : null;
+
+    return (
     <button
       key={group.id}
       type="button"
@@ -156,16 +167,33 @@ export default function DocumentMap({
         fontSize: "13px",
         color: "rgba(255,255,255,0.7)",
       }}
-      className="mb-1 block w-full rounded-lg py-1 text-left hover:bg-white/5"
+      className={`mb-1 block w-full rounded-lg py-1 text-left hover:bg-white/5 ${
+        isActiveGroup ? "bg-white/10" : ""
+      }`}
       onClick={() => {
+        onSelectGroup?.(group);
         if (parentHeadingId) {
           scrollToTarget(previewScrollRef, parentHeadingId);
         }
       }}
     >
-      {groupKindMeta[group.kind].icon} {formatGroupLabel(group)}
+      <span>
+        {groupKindMeta[group.kind].icon} {formatGroupLabel(group)}
+      </span>
+      {confidencePct ? (
+        <span
+          style={{
+            marginLeft: "6px",
+            fontSize: "11px",
+            opacity: 0.7,
+          }}
+        >
+          {confidencePct}
+        </span>
+      ) : null}
     </button>
-  );
+    );
+  };
 
   return (
     <aside className="h-full overflow-auto rounded-2xl border border-white/10 bg-black/25 p-3 backdrop-blur-2xl shadow-[0_18px_45px_rgba(0,0,0,0.35)]">
