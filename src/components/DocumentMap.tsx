@@ -4,7 +4,7 @@ import { useState } from "react";
 import type { ReactNode, RefObject } from "react";
 
 import type { DocDiagnostics } from "@/lib/docDiagnostics";
-import type { DocIntelligence } from "@/lib/docIntelligence";
+import type { DocIntelligence, DocStructuralGroup } from "@/lib/docIntelligence";
 
 type Props = {
   intelligence: DocIntelligence | null;
@@ -86,6 +86,8 @@ export default function DocumentMap({
   activeHeadingId,
 }: Props) {
   const sections = intelligence?.headings ?? [];
+  const groups = intelligence?.groups ?? [];
+  const hierarchy = intelligence?.hierarchy ?? [];
   const title =
     intelligence?.titleBlock?.title ??
     sections.find((h) => h.level === 1)?.text ??
@@ -97,6 +99,37 @@ export default function DocumentMap({
   const procedures = intelligence?.procedures ?? [];
   const roadmaps = intelligence?.roadmaps ?? [];
   const commandBlocks = codeBlocks.filter((b) => b.kind === "command");
+
+  const groupsByParentId = new Map<string, DocStructuralGroup[]>();
+  const headingIds = new Set(sections.map((h) => h.id));
+  const titleNodeIds = new Set(
+    hierarchy.filter((n) => n.role === "title").map((n) => n.id),
+  );
+
+  for (const group of groups) {
+    const parentKey = group.parentId ?? "root";
+    const arr = groupsByParentId.get(parentKey) ?? [];
+    arr.push(group);
+    groupsByParentId.set(parentKey, arr);
+  }
+
+  for (const arr of groupsByParentId.values()) {
+    arr.sort((a, b) => (a.startLine ?? Number.MAX_SAFE_INTEGER) - (b.startLine ?? Number.MAX_SAFE_INTEGER));
+  }
+
+  const rootGroups = groups.filter(
+    (g) => !g.parentId || g.parentId === "root" || titleNodeIds.has(g.parentId),
+  );
+  const otherGroups = groups.filter(
+    (g) => g.parentId && !headingIds.has(g.parentId) && !titleNodeIds.has(g.parentId),
+  );
+
+  const formatGroupLabel = (group: DocStructuralGroup) => {
+    const kindLabel = group.kind.replace(/_/g, " ");
+    const titleLabel = group.title?.trim() || "Untitled";
+    return `${kindLabel} - ${titleLabel}`;
+  };
+
   return (
     <aside className="h-full overflow-auto rounded-2xl border border-white/10 bg-black/25 p-3 backdrop-blur-2xl shadow-[0_18px_45px_rgba(0,0,0,0.35)]">
       <div className="mb-3">
@@ -146,15 +179,37 @@ export default function DocumentMap({
       ) : null}
 
       <div className="space-y-3">
+        <Group title="Document-level groups" count={rootGroups.length} defaultOpen={false}>
+          {rootGroups.map((group) => (
+            <div
+              key={group.id}
+              style={{ paddingLeft: "16px", opacity: 0.85, fontSize: "13px" }}
+              className="mb-1 rounded-lg py-1 text-white/80"
+            >
+              - {formatGroupLabel(group)}
+            </div>
+          ))}
+        </Group>
+
         <Group title="Sections" count={sections.length}>
           {sections.map((h) => (
-            <Item
-              key={h.id}
-              label={h.text}
-              sublabel={`H${h.level}`}
-              active={activeHeadingId === h.id}
-              onClick={() => scrollToTarget(previewScrollRef, h.id)}
-            />
+            <div key={h.id}>
+              <Item
+                label={h.text}
+                sublabel={`H${h.level}`}
+                active={activeHeadingId === h.id}
+                onClick={() => scrollToTarget(previewScrollRef, h.id)}
+              />
+              {(groupsByParentId.get(h.id) ?? []).map((group) => (
+                <div
+                  key={group.id}
+                  style={{ paddingLeft: "16px", opacity: 0.85, fontSize: "13px" }}
+                  className="mb-1 rounded-lg py-1 text-white/80"
+                >
+                  - {formatGroupLabel(group)}
+                </div>
+              ))}
+            </div>
           ))}
         </Group>
 
@@ -213,6 +268,18 @@ export default function DocumentMap({
                 if (match) scrollToTarget(previewScrollRef, match.id);
               }}
             />
+          ))}
+        </Group>
+
+        <Group title="Other groups" count={otherGroups.length} defaultOpen={false}>
+          {otherGroups.map((group) => (
+            <div
+              key={group.id}
+              style={{ paddingLeft: "16px", opacity: 0.85, fontSize: "13px" }}
+              className="mb-1 rounded-lg py-1 text-white/80"
+            >
+              - {formatGroupLabel(group)}
+            </div>
           ))}
         </Group>
       </div>
