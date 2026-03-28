@@ -739,10 +739,6 @@ export function normalizeInput(
       continue;
     }
 
-    if (/^helixia pro$/i.test(line.trim())) {
-      continue;
-    }
-
     // Preserve shell-style comments as text when they introduce command/code blocks.
     if (/^\s*#\s+/.test(line)) {
       const nextNonBlank = nextNonBlankLine(lines, i + 1);

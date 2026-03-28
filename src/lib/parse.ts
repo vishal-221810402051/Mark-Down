@@ -370,15 +370,12 @@ export async function parseMarkdownToHtml(
   html = applyHeadingIds(html, headings);
   html = promoteCommandsLabelHtml(html);
 
-  const includeToc = opts?.includeToc ?? true;
-  const tocMaxDepth = opts?.tocMaxDepth ?? 3;
-  if (includeToc) {
-    const tocHtml = buildTocHtml(headings, tocMaxDepth);
-    if (tocHtml) html = tocHtml + html;
-  }
+  // IMPORTANT: extract intelligence from document HTML before TOC injection
+  // so TOC content cannot contaminate title/hierarchy/group inference.
+  const intelligenceHtml = html;
 
   const intelligence: DocIntelligence = extractDocIntelligence({
-    html,
+    html: intelligenceHtml,
     headings: headings.map((h) => ({
       id: h.id,
       text: h.text,
@@ -386,6 +383,13 @@ export async function parseMarkdownToHtml(
     })),
     normalizationNotes: [],
   });
+
+  const includeToc = opts?.includeToc ?? true;
+  const tocMaxDepth = opts?.tocMaxDepth ?? 3;
+  if (includeToc) {
+    const tocHtml = buildTocHtml(headings, tocMaxDepth);
+    if (tocHtml) html = tocHtml + html;
+  }
 
   return {
     html,

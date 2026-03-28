@@ -73,6 +73,7 @@ Thumbs.db
 .tmp_*.ts
 .tmp_*.js
 .tmp_*.md
+.tmp_*
 
 # optional local test artifacts
 tests/tmp/
